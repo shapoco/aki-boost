@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.114
+// @version     1.0.126
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -19,7 +19,7 @@
   const APP_NAME = 'Aki Fixer';
   const SETTING_KEY = 'akifix_settings';
   const NAME_KEY_PREFIX = 'akifix-partname-';
-  const LINK_TITLE = `${APP_NAME} によって作成されたリンク`;
+  const LINK_TITLE = `${APP_NAME} によるアノテーション`;
 
   class AkiFixer {
     constructor() {
@@ -37,6 +37,9 @@
         }
         else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
           await this.fixItemPage();
+        }
+        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
+          await this.fixCatalog();
         }
       }
     }
@@ -82,7 +85,7 @@
             a.textContent = '検索';
             a.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
           }
-          setStyle(a);
+          setBackgroundStyle(a);
           itemDiv.appendChild(a);
           itemDiv.appendChild(document.createTextNode(partName));
         }
@@ -126,6 +129,7 @@
       await this.saveDatabase();
     }
 
+    // MARK: 商品ページを修正
     async fixItemPage() {
       const id = document.querySelector('#hidden_goods').value;
       const wideName = document.querySelector('#hidden_goods_name').value;
@@ -134,7 +138,7 @@
         console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${name}'`);
       }
 
-      const part = await this.partById(id, name);
+      const part = this.partById(id, name);
 
       const h1 = document.querySelector('.block-goods-name--text');
       if (!h1) {
@@ -161,10 +165,53 @@
         link.title = LINK_TITLE;
         div.appendChild(link);
       }
-      setStyle(div);
+      setBackgroundStyle(div);
 
       h1.parentElement.appendChild(div);
 
+      await this.saveDatabase();
+    }
+
+    // MARK: カタログページを修正
+    async fixCatalog() {
+      const itemDls = Array.from(document.querySelectorAll('.block-cart-i--goods'));
+      for (const itemDl of itemDls) {
+        const link = itemDl.querySelector('.js-enhanced-ecommerce-goods-name');
+        const name = this.normalizePartName(link.title);
+        const m = link.href.match(/\/catalog\/g\/g(\d+)\//);
+        if (!m) continue;
+        const id = m[1];
+        const part = this.partById(id, name);
+        if (part.orderIds && part.orderIds.length > 0) {
+          setBackgroundStyle(itemDl);
+
+          const itemDt = itemDl.querySelector('.block-cart-i--goods-image');
+          const div = document.createElement('div');
+          div.style.backgroundColor = '#06c';
+          div.style.padding = '1px 5px';
+          div.style.position = 'absolute';
+          div.style.right = '0';
+          div.style.bottom = '0';
+          div.style.borderRadius = '4px';
+          div.style.fontSize = '10px';
+          div.style.color = '#fff';
+          let time = -1;
+          for (let orderId of part.orderIds) {
+            if (!(orderId in this.settings.orders)) continue;
+            time = Math.max(time, this.settings.orders[orderId].time);
+          }
+          if (time >= 0) {
+            div.innerText = prettyDate(time) + 'に購入';
+            div.title = new Date(time).toLocaleString() + '\n' + LINK_TITLE;
+          }
+          else {
+            div.innerText = part.orderIds.length + '回購入';
+            div.title = LINK_TITLE;
+
+          }
+          itemDt.appendChild(div);
+        }
+      }
       await this.saveDatabase();
     }
 
@@ -331,10 +378,13 @@
     }
   }
 
-  function setStyle(elem) {
-    elem.style.backgroundColor = '#edd';
+  function setBackgroundStyle(elem) {
+    elem.style.backgroundColor = '#def';
     elem.style.borderRadius = '5px';
-    if (elem.tagName === 'DIV') {
+    if (elem.tagName === 'DL') {
+      // do nothing
+    }
+    else if (elem.tagName === 'DIV') {
       elem.style.padding = '5px 10px';
     }
     else {
@@ -357,6 +407,16 @@
       t = new Date(year, month, day, hour, min, sec).getTime();
     }
     return t;
+  }
+  
+  function prettyDate(t) {
+    const days = (new Date().getTime() - t) / (1000 * 86400);
+    const years = days / 365.2425;
+    const month = years * 12;
+    if (days < 1) return '1日以内';
+    if (month < 1) return `${Math.round(days)}日前`;
+    if (years < 1) return `${Math.round(month * 10) / 10}ヶ月前`;
+    return `${Math.round(years * 10) / 10}年前`;
   }
 
   function toNarrow(orig) {
