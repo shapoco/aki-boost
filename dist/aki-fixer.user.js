@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.74
+// @version     1.0.84
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -130,6 +130,9 @@
         div.appendChild(link);
       }
 
+      div.style.backgroundColor = '#f8f0f0';
+      div.style.padding = '5px 10px';
+      div.style.borderRadius = '5px';
       h1.parentElement.appendChild(div);
 
       await this.saveDatabase();
