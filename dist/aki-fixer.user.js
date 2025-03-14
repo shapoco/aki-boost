@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.59
+// @version     1.0.71
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -19,6 +19,7 @@
   const APP_NAME = 'Aki Fixer';
   const SETTING_KEY = 'akifix_settings';
   const HASH_PREFIX = 'akifix-namehash-';
+  const LINK_TITLE = `${APP_NAME} によって作成されたリンク`;
 
   class AkiFixer {
     constructor() {
@@ -31,8 +32,11 @@
         if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
           await this.scanHistory();
         }
-        if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
+        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
           await this.scanHistoryDetail();
+        }
+        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
+          await this.fixItemPage();
         }
       }
     }
@@ -59,6 +63,11 @@
           const part = await this.partByName(partName);
           part.linkOrder(id);
           order.linkPart(part.id);
+
+          // ID が分かる場合はリンクを張る
+          if (part.id && !part.id.startsWith(HASH_PREFIX)) {
+            itemDiv.innerHTML = `<a href="https://akizukidenshi.com/catalog/g/g${part.id}/" title="${LINK_TITLE}">${part.id}</a> | ${itemDiv.textContent}`;
+          }
         }
       }
       await this.saveDatabase();
@@ -73,7 +82,8 @@
 
       let order = this.orderById(orderId, time);
       for (let partRow of partRows) {
-        const partId = partRow.querySelector('.block-purchase-history-detail--goods-code').textContent.trim();
+        const partIdDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
+        const partId = partIdDiv.textContent.trim();
         const partName = this.normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
         if (!partId || !partName) {
           console.error(`[${APP_NAME}] part ID or name not found`);
@@ -82,7 +92,44 @@
         let part = await this.partById(partId, partName);
         order.linkPart(partId);
         part.linkOrder(orderId);
+
+        // ID にリンクを張る
+        partIdDiv.innerHTML = `<a href="https://akizukidenshi.com/catalog/g/g${part.id}/" title="${LINK_TITLE}">${part.id}</a>`;
       }
+      await this.saveDatabase();
+    }
+
+    async fixItemPage() {
+      const id = document.querySelector('#hidden_goods').value;
+      const name = document.querySelector('#hidden_goods_name').value;
+      const part = await this.partById(id, name);
+
+      const h1 = document.querySelector('.block-goods-name--text');
+      if (!h1) {
+        console.error(`[${APP_NAME}] item name not found`);
+        return;
+      }
+
+      const div = document.createElement('div');
+      div.appendChild(document.createTextNode('購入履歴: '));
+      let first = true;
+      for (let orderId of part.orderIds) {
+        if (!(orderId in this.settings.orders)) continue;
+        const order = this.settings.orders[orderId];
+        const link = document.createElement('a');
+        link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
+        link.textContent = new Date(order.time).toLocaleDateString();
+        link.title = LINK_TITLE;
+        if (first) {
+          first = false;
+        }
+        else {
+          div.appendChild(document.createTextNode(' | '));
+        }
+        div.appendChild(link);
+      }
+      h1.parentElement.appendChild(div);
+
       await this.saveDatabase();
     }
 
