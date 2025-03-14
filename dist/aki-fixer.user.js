@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.84
+// @version     1.0.114
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -18,7 +18,7 @@
 
   const APP_NAME = 'Aki Fixer';
   const SETTING_KEY = 'akifix_settings';
-  const HASH_PREFIX = 'akifix-namehash-';
+  const NAME_KEY_PREFIX = 'akifix-partname-';
   const LINK_TITLE = `${APP_NAME} によって作成されたリンク`;
 
   class AkiFixer {
@@ -54,20 +54,37 @@
         const itemDivs = Array.from(table.querySelectorAll('.block-purchase-history--goods-name'));
         for (let itemDiv of itemDivs) {
           // 部品情報の取得
-          const partName = this.normalizePartName(itemDiv.textContent);
-          if (!partName) {
+          const wideName = this.normalizePartName(itemDiv.textContent);
+          if (!wideName) {
             console.error(`[${APP_NAME}] part name not found`);
             continue;
           }
+          const partName = this.normalizePartName(wideName);
+          if (partName != wideName) {
+            console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${partName}'`);
+          }
 
-          const part = await this.partByName(partName);
+          const part = this.partByName(partName);
           part.linkOrder(id);
           order.linkPart(part.id);
 
-          // ID が分かる場合はリンクを張る
-          if (part.id && !part.id.startsWith(HASH_PREFIX)) {
-            itemDiv.innerHTML = `<a href="https://akizukidenshi.com/catalog/g/g${part.id}/" title="${LINK_TITLE}">${part.id}</a> | ${itemDiv.textContent}`;
+          itemDiv.innerHTML = '';
+          const a = document.createElement('a');
+          a.title = LINK_TITLE;
+          if (part.id && !part.id.startsWith(NAME_KEY_PREFIX)) {
+            // 商品コードが分かる場合はリンクを張る
+            a.textContent = part.id;
+            a.href = `https://akizukidenshi.com/catalog/g/g${part.id}/`;
           }
+          else {
+            // 商品コードが分からない場合は検索リンクにする
+            const keyword = partName.replaceAll(/\s*\([^\)]+入\)$/g, '');
+            a.textContent = '検索';
+            a.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
+          }
+          setStyle(a);
+          itemDiv.appendChild(a);
+          itemDiv.appendChild(document.createTextNode(partName));
         }
       }
       await this.saveDatabase();
@@ -84,24 +101,39 @@
       for (let partRow of partRows) {
         const partIdDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partId = partIdDiv.textContent.trim();
-        const partName = this.normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
+        const wideName = partRow.querySelector('.block-purchase-history-detail--goods-name').textContent;
+        const partName = this.normalizePartName(wideName);
+        if (partName != wideName) {
+          console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${partName}'`);
+        }
+
         if (!partId || !partName) {
           console.error(`[${APP_NAME}] part ID or name not found`);
           continue;
         }
-        let part = await this.partById(partId, partName);
+        let part = this.partById(partId, partName);
         order.linkPart(partId);
         part.linkOrder(orderId);
 
         // ID にリンクを張る
-        partIdDiv.innerHTML = `<a href="https://akizukidenshi.com/catalog/g/g${part.id}/" title="${LINK_TITLE}">${part.id}</a>`;
+        partIdDiv.innerHTML = '';
+        const a = document.createElement('a');
+        a.href = `https://akizukidenshi.com/catalog/g/g${part.id}/`;
+        a.textContent = part.id;
+        a.title = LINK_TITLE;
+        partIdDiv.appendChild(a);
       }
       await this.saveDatabase();
     }
 
     async fixItemPage() {
       const id = document.querySelector('#hidden_goods').value;
-      const name = document.querySelector('#hidden_goods_name').value;
+      const wideName = document.querySelector('#hidden_goods_name').value;
+      const name = this.normalizePartName(wideName);
+      if (name != wideName) {
+        console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${name}'`);
+      }
+
       const part = await this.partById(id, name);
 
       const h1 = document.querySelector('.block-goods-name--text');
@@ -129,10 +161,8 @@
         link.title = LINK_TITLE;
         div.appendChild(link);
       }
+      setStyle(div);
 
-      div.style.backgroundColor = '#f8f0f0';
-      div.style.padding = '5px 10px';
-      div.style.borderRadius = '5px';
       h1.parentElement.appendChild(div);
 
       await this.saveDatabase();
@@ -160,7 +190,7 @@
     }
 
     // MARK: 部品情報をIDから取得
-    async partById(id, name) {
+    partById(id, name) {
       if (!this.settings.parts) this.settings.parts = {};
 
       let part = new Part(id, name);
@@ -174,9 +204,9 @@
         this.settings.parts[id] = part;
       }
 
-      const hash = await this.hashOf(name);
-      if (hash in this.settings.parts) {
-        let byName = this.settings.parts[hash];
+      const nameKey = this.nameKeyOf(name);
+      if (nameKey in this.settings.parts) {
+        let byName = this.settings.parts[nameKey];
         if (!byName.id) {
           console.log(`[${APP_NAME}] part name linked to ID: ${byName.name} --> ${id}`);
           byName.id = id;
@@ -188,16 +218,16 @@
     }
 
     // MARK: 部品情報を名前から取得
-    async partByName(name) {
+    partByName(name) {
       if (!this.settings.parts) this.settings.parts = {};
 
       let part = new Part(null, name);
 
       // ハッシュで参照
-      const hash = await this.hashOf(name);
-      if (hash in this.settings.parts) {
-        part = this.settings.parts[hash];
-        if (part.id && !part.id.startsWith(HASH_PREFIX) && part.id in this.settings.parts) {
+      const nameKey = this.nameKeyOf(name);
+      if (nameKey in this.settings.parts) {
+        part = this.settings.parts[nameKey];
+        if (part.id && !part.id.startsWith(NAME_KEY_PREFIX) && part.id in this.settings.parts) {
           // 品番が登録済みの場合はその情報を返す
           part = this.settings.parts[part.id];
         }
@@ -205,7 +235,7 @@
       else {
         // 新規部品の場合は登録
         console.log(`[${APP_NAME}] new part name: ${name}`);
-        this.settings.parts[hash] = part;
+        this.settings.parts[nameKey] = part;
       }
       return part;
     }
@@ -216,11 +246,9 @@
     }
 
     // MARK: 部品名をハッシュ化
-    async hashOf(name) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(name);
-      const hash = await crypto.subtle.digest("SHA-256", data)
-      return HASH_PREFIX + btoa(String.fromCharCode(...new Uint8Array(hash)));
+    nameKeyOf(name) {
+      return this.normalizePartName(name)
+        .replaceAll(/[-\/\s]/g, '');
     }
 
     // MARK: データベースの読み込み
@@ -303,6 +331,19 @@
     }
   }
 
+  function setStyle(elem) {
+    elem.style.backgroundColor = '#edd';
+    elem.style.borderRadius = '5px';
+    if (elem.tagName === 'DIV') {
+      elem.style.padding = '5px 10px';
+    }
+    else {
+      elem.style.padding = '2px 5px';
+      elem.style.marginRight = '5px';
+      elem.style.verticalAlign = 'middle';
+    }
+  }
+
   function parseDate(dateStr) {
     const m = dateStr.match(/\b(\d+)[年\/](\d+)[月\/](\d+)日?(\s+(\d+):(\d+):(\d+))?\b/);
     const year = parseInt(m[1]);
@@ -319,7 +360,25 @@
   }
 
   function toNarrow(orig) {
-    const ret = orig.replaceAll(/[Ａ-Ｚａ-ｚ０-９]/g, m => String.fromCharCode(m.charCodeAt(0) - 0xFEE0));
+    let ret = orig
+      .replaceAll(/[Ａ-Ｚａ-ｚ０-９]/g, m => String.fromCharCode(m.charCodeAt(0) - 0xFEE0))
+      .replaceAll('　', ' ')
+      .replaceAll('．', '.')
+      .replaceAll('，', ',')
+      .replaceAll('：', ':')
+      .replaceAll('；', ';')
+      .replaceAll('－', '-')
+      .replaceAll('％', '%')
+      .replaceAll('＃', '#')
+      .replaceAll('＿', '_')
+      .replaceAll('（', '(')
+      .replaceAll('）', ')')
+      .replaceAll('［', '[')
+      .replaceAll('］', ']')
+      .replaceAll('｛', '{')
+      .replaceAll('｝', '}')
+      .replaceAll('／', '/')
+      .replaceAll('＼', '\\');
     console.assert(orig.length == ret.length);
     return ret;
   }
