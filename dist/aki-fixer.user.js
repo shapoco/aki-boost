@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.71
+// @version     1.0.73
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -112,7 +112,6 @@
 
       const div = document.createElement('div');
       div.appendChild(document.createTextNode('購入履歴: '));
-      let first = true;
       for (let orderId of part.orderIds) {
         if (!(orderId in this.settings.orders)) continue;
         const order = this.settings.orders[orderId];
@@ -120,14 +119,17 @@
         link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
         link.textContent = new Date(order.time).toLocaleDateString();
         link.title = LINK_TITLE;
-        if (first) {
-          first = false;
-        }
-        else {
-          div.appendChild(document.createTextNode(' | '));
-        }
+        div.appendChild(link);
+        div.appendChild(document.createTextNode(' | '));
+      }
+      {
+        const link = document.createElement('a');
+        link.href = `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B      `;
+        link.textContent = "購入履歴から検索";
+        link.title = LINK_TITLE;
         div.appendChild(link);
       }
+
       h1.parentElement.appendChild(div);
 
       await this.saveDatabase();
