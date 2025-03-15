@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.166
+// @version     1.0.209
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -26,20 +26,24 @@
   class AkiBoost {
     constructor() {
       this.db = new Database();
-      this.menuWindow = document.createElement('div');
+      this.menuOpenButton = document.createElement('button');
+      this.menuWindow = createWindow(APP_NAME, '250px');
       this.databaseInfoLabel = document.createElement('span');
+      this.isLoggedIn = false;
     }
 
     async start() {
+      this.checkLoginState();
+
       await this.loadDatabase();
 
       this.setupMenu();
 
       if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
-        await this.scanHistory();
+        await this.scanHistory(document);
       }
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
-        await this.scanHistoryDetail();
+        await this.scanHistoryDetail(document);
       }
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
         await this.fixItemPage();
@@ -49,35 +53,33 @@
       }
     }
 
+    checkLoginState() {
+      this.isLoggedIn =
+        !!Array.from(document.querySelectorAll('img'))
+          .find(img => img.alt == 'マイページ');
+    }
+
     // MARK: メニュー
     setupMenu() {
-      const openButton = document.createElement('button');
-      openButton.textContent = `⚙ ${APP_NAME}`;
-      openButton.style.writingMode = 'vertical-rl';
-      openButton.style.position = 'fixed';
-      openButton.style.left = '0px';
-      openButton.style.bottom = '100px';
-      openButton.style.zIndex = '10000';
-      openButton.style.padding = '10px 5px';
-      openButton.style.backgroundColor = '#06c';
-      openButton.style.borderStyle = 'none';
-      openButton.style.borderRadius = '0 5px 5px 0';
-      openButton.style.color = '#fff';
-      openButton.style.fontSize = '12px';
-      openButton.style.cursor = 'pointer';
-      document.body.appendChild(openButton);
+      this.menuOpenButton.textContent = `⚙ ${APP_NAME}`;
+      this.menuOpenButton.style.writingMode = 'vertical-rl';
+      this.menuOpenButton.style.position = 'fixed';
+      this.menuOpenButton.style.left = '0px';
+      this.menuOpenButton.style.bottom = '100px';
+      this.menuOpenButton.style.zIndex = '10000';
+      this.menuOpenButton.style.padding = '10px 5px';
+      this.menuOpenButton.style.backgroundColor = '#06c';
+      this.menuOpenButton.style.borderStyle = 'none';
+      this.menuOpenButton.style.borderRadius = '0 5px 5px 0';
+      this.menuOpenButton.style.color = '#fff';
+      this.menuOpenButton.style.fontSize = '12px';
+      this.menuOpenButton.style.cursor = 'pointer';
+      document.body.appendChild(this.menuOpenButton);
 
       this.menuWindow.style.position = 'fixed';
       this.menuWindow.style.left = '40px';
       this.menuWindow.style.bottom = '100px';
-      this.menuWindow.style.zIndex = '10000';
-      this.menuWindow.style.width = '250px';
-      this.menuWindow.style.backgroundColor = '#def';
-      this.menuWindow.style.border = '1px solid #06c';
-      this.menuWindow.style.borderRadius = '5px';
       this.menuWindow.style.display = 'none';
-      this.menuWindow.style.fontSize = '12px';
-      this.menuWindow.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
 
       const closeButton = document.createElement('button');
       closeButton.textContent = '×';
@@ -99,20 +101,20 @@
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const resetButton = createButton('データベースをリセット');
+      const resetButton = createButton('データベースをリセット', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(resetButton));
 
-      const learnButton = createButton('購入履歴を読み込む');
+      const learnButton = createButton('購入履歴を読み込む', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(learnButton));
-
-      this.menuWindow.appendChild(wrapWithParagraph(
-        '※ 購入履歴を読み込む前に\n' +
-        '<a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a>\n' +
-        '済みであることを確認してください。'));
+      if (!this.isLoggedIn) {
+        learnButton.disabled = true;
+        this.menuWindow.appendChild(wrapWithParagraph(
+          '※ 購入履歴を読み込む前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
+      }
 
       document.body.appendChild(this.menuWindow);
 
-      openButton.addEventListener('click', () => {
+      this.menuOpenButton.addEventListener('click', () => {
         this.updateDatabaseInfo();
         this.menuWindow.style.display = this.menuWindow.style.display === 'none' ? 'block' : 'none';
       });
@@ -128,18 +130,163 @@
           this.updateDatabaseInfo();
         }
       });
+
+      learnButton.addEventListener('click', async () => {
+        this.menuWindow.style.display = 'none';
+        try {
+          await this.openLoadHistoryTool();
+        }
+        catch (e) {
+          debugError(e);
+        }
+      });
+    }
+
+    // MARK: 購入履歴の読み込み
+    async openLoadHistoryTool() {
+      this.menuOpenButton.disabled = true;
+
+      this.loadDatabase();
+
+      const toolWindow = createWindow('購入履歴の読み込み', '300px');
+      toolWindow.style.position = 'fixed';
+      toolWindow.style.left = '50%';
+      toolWindow.style.top = '50%';
+      toolWindow.style.transform = 'translate(-50%, -50%)';
+      document.body.appendChild(toolWindow);
+
+      const status = wrapWithParagraph('[開始] ボタンで読み込みを開始します。');
+      toolWindow.appendChild(status);
+
+      const progressBar = document.createElement('progress');
+      progressBar.max = 100;
+      progressBar.value = 0;
+      progressBar.style.width = '100%';
+      progressBar.style.opacity = '0.25';
+      toolWindow.appendChild(wrapWithParagraph(progressBar));
+
+      const startButton = createButton('開始', '80px');
+      const closeButton = createButton('閉じる', '80px');
+      const p = wrapWithParagraph([startButton, '\n', closeButton]);
+      p.style.textAlign = 'center';
+      toolWindow.appendChild(p);
+
+      closeButton.addEventListener('click', () => {
+        toolWindow.remove();
+        this.menuOpenButton.disabled = false;
+      });
+
+      startButton.addEventListener('click', async () => {
+        startButton.disabled = true;
+        closeButton.disabled = true;
+        progressBar.style.opacity = '1';
+        await this.loadHistory(status, progressBar);
+        closeButton.disabled = false;
+      });
+    }
+
+    async loadHistory(status, progressBar) {
+      const unknownOrderIds = Object.keys(this.db.orders);
+
+      try {
+        const PAGE_STRIDE = DEBUG_MODE ? 5 : 100;
+        let doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
+
+        let numOrders = -1;
+
+        // ページ数を推定
+        const pagerCount = doc.querySelector('.pager-count');
+        if (pagerCount) {
+          const m = pagerCount.textContent.match(/\b(\d+)\s*件/);
+          if (m) {
+            numOrders = parseInt(m[1]);
+          }
+        }
+        else {
+          debugError('ページ数不明');
+        }
+
+        let orderIds = [];
+
+        // オーダー ID を列挙
+        while (true) {
+          status.textContent = `オーダー ID を列挙しています... (${orderIds.length}/${numOrders > 0 ? numOrders : '?'})`;
+          if (numOrders > 0) {
+            progressBar.value = orderIds.length * 100 / numOrders;
+          }
+
+          // ページ内のオーダー ID を取得
+          const tables = Array.from(doc.querySelectorAll('.block-purchase-history--table'));
+          for (let table of tables) {
+            const idUls = table.querySelector('.block-purchase-history--order-detail-list');
+            orderIds.push(idUls.querySelector('a').textContent.trim());
+          }
+
+          // 次のページへ
+          const pagerNext = doc.querySelector('.pager-next');
+          if (!pagerNext) break;
+          const nextLink = pagerNext.querySelector('a');
+          if (!nextLink || nextLink.rel != 'next') break;
+          doc = await this.downloadHtml(nextLink.href);
+        }
+
+        // オーダーID ごとに詳細を読み込む
+        let numLoaded = 0;
+        for (let i = 0; i < orderIds.length; i++) {
+          const orderId = orderIds[i];
+          if (!(orderId in this.db.orders)) {
+            status.textContent = `購入履歴を読み込んでいます... (${i + 1}/${orderIds.length})`;
+            progressBar.value = i * 100 / orderIds.length;
+
+            const doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
+            this.scanHistoryDetail(doc);
+
+            numLoaded++;
+          }
+          unknownOrderIds.splice(unknownOrderIds.indexOf(orderId), 1);
+        }
+
+        // 未知のオーダー ID を削除
+        for (let orderId of unknownOrderIds) {
+          debugLog(`未知の注文情報の削除: ${orderId}`);
+          delete this.db.orders[orderId];
+        }
+
+        this.updateDatabaseInfo();
+        this.saveDatabase();
+
+        if (numLoaded == 0) {
+          status.textContent = '新しい購入履歴はありませんでした。';
+        }
+        else {
+          status.textContent = `${numLoaded} 件の購入履歴が新たに読み込まれました。`;
+        }
+        progressBar.value = 100;
+      }
+      catch (e) {
+        this.db = bkp;
+        const msg = `⚠ 読み込みに失敗しました`;
+        debugError(`${msg}: ${e}`);
+        status.textContent = msg;
+      }
+    }
+
+    async downloadHtml(url) {
+      const res = await fetch(url);
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(await res.text(), 'text/html');
+      return doc;
     }
 
     updateDatabaseInfo() {
       this.databaseInfoLabel.innerHTML =
-        `${APP_NAME}<br>\n` +
         `記憶している注文情報: ${Object.keys(this.db.orders).length}件<br>` +
         `記憶している部品情報: ${Object.keys(this.db.parts).length}件`;
     }
 
     // MARK: 購入履歴をスキャン
-    async scanHistory() {
-      const tables = Array.from(document.querySelectorAll('.block-purchase-history--table'));
+    async scanHistory(doc) {
+      const tables = Array.from(doc.querySelectorAll('.block-purchase-history--table'));
       for (let table of tables) {
         const idUls = table.querySelector('.block-purchase-history--order-detail-list');
 
@@ -187,10 +334,10 @@
     }
 
     // MARK: 購入履歴詳細をスキャン
-    async scanHistoryDetail() {
-      const orderId = document.querySelector('.block-purchase-history-detail--order-id').textContent.trim();
-      const time = parseDate(document.querySelector('.block-purchase-history-detail--order-dt').textContent);
-      const partTableTbody = document.querySelector('.block-purchase-history-detail--order-detail-items tbody');
+    async scanHistoryDetail(doc) {
+      const orderId = doc.querySelector('.block-purchase-history-detail--order-id').textContent.trim();
+      const time = parseDate(doc.querySelector('.block-purchase-history-detail--order-dt').textContent);
+      const partTableTbody = doc.querySelector('.block-purchase-history-detail--order-detail-items tbody');
       const partRows = Array.from(partTableTbody.querySelectorAll('tr'));
 
       let order = this.orderById(orderId, time);
@@ -485,24 +632,51 @@
     }
   }
 
-  function createButton(text) {
+  function createWindow(title, width = '300px') {
+    const div = document.createElement('div');
+    div.style.zIndex = '10000';
+    div.style.width = width;
+    div.style.backgroundColor = '#def';
+    div.style.border = '1px solid #06c';
+    div.style.borderRadius = '5px';
+    div.style.fontSize = '12px';
+    div.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
+
+    const caption = document.createElement('div');
+    caption.textContent = title;
+    caption.style.backgroundColor = '#06c';
+    caption.style.color = '#fff';
+    caption.style.padding = '5px';
+    div.appendChild(caption);
+
+    return div;
+  }
+
+  function createButton(text, width = null) {
     const button = document.createElement('button');
     button.textContent = text;
     button.style.boxSizing = 'border-box';
-    button.style.width = '100%';
+    if (width) button.style.width = width;
     button.style.cursor = 'pointer';
     return button;
   }
 
-  function wrapWithParagraph(elem) {
+  function wrapWithParagraph(elems) {
     const p = document.createElement('p');
     p.style.margin = '5px';
-    if (typeof elem === 'string') {
-      p.innerHTML = elem;
+
+    if (!Array.isArray(elems)) elems = [elems];
+    for (let elem of elems) {
+      if (typeof elem == 'string') {
+        const span = document.createElement('span');
+        span.innerHTML = elem;
+        p.appendChild(span);
+      }
+      else {
+        p.appendChild(elem);
+      }
     }
-    else {
-      p.appendChild(elem);
-    }
+
     return p;
   }
 
