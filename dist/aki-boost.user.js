@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name        Aki Fixer
-// @namespace   https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/
-// @updateURL   https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
-// @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
+// @name        Aki Boost
+// @namespace   https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/
+// @updateURL   https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
+// @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.161
+// @version     1.0.166
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -18,12 +18,12 @@
 
   const DEBUG_MODE = false;
 
-  const APP_NAME = 'Aki Fixer';
-  const SETTING_KEY = 'akifix_settings';
-  const NAME_KEY_PREFIX = 'akifix-partname-';
+  const APP_NAME = 'Aki Boost';
+  const SETTING_KEY = 'akibst_settings';
+  const NAME_KEY_PREFIX = 'akibst-partname-';
   const LINK_TITLE = `${APP_NAME} によるアノテーション`;
 
-  class AkiFixer {
+  class AkiBoost {
     constructor() {
       this.db = new Database();
       this.menuWindow = document.createElement('div');
@@ -353,6 +353,9 @@
         }
         part.migrateFrom(byName);
       }
+      else {
+        this.db.parts[nameKey] = new Part(code, name);
+      }
 
       return part;
     }
@@ -387,8 +390,8 @@
 
     // MARK: 部品名をハッシュ化
     nameKeyOf(name) {
-      return this.normalizePartName(name)
-        .replaceAll(/[-\/\s]/g, '');
+      return NAME_KEY_PREFIX +
+        this.normalizePartName(name).replaceAll(/[-\/\s]/g, '');
     }
 
     // MARK: データベースの読み込み
@@ -426,8 +429,14 @@
     }
 
     reportDatabase() {
+      let partWithName = 0;
+      for (const key in this.db.parts) {
+        if (key.startsWith(NAME_KEY_PREFIX)) {
+          partWithName++;
+        }
+      }
       debugLog(`注文情報: ${Object.keys(this.db.orders).length}件`);
-      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
+      debugLog(`部品情報: ${Object.keys(this.db.parts).length - partWithName} + ${partWithName}件`);
     }
   }
 
@@ -488,7 +497,7 @@
   function wrapWithParagraph(elem) {
     const p = document.createElement('p');
     p.style.margin = '5px';
-    if (typeof elem ==='string') {
+    if (typeof elem === 'string') {
       p.innerHTML = elem;
     }
     else {
@@ -574,7 +583,7 @@
     }
   }
 
-  window.akifix = new AkiFixer();
-  window.onload = async () => await window.akifix.start();
+  window.akibst = new AkiBoost();
+  window.onload = async () => await window.akibst.start();
 
 })();

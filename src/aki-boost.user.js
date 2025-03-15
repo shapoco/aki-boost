@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.161
+// @version     1.0.166
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -353,6 +353,9 @@
         }
         part.migrateFrom(byName);
       }
+      else {
+        this.db.parts[nameKey] = new Part(code, name);
+      }
 
       return part;
     }
@@ -387,8 +390,8 @@
 
     // MARK: 部品名をハッシュ化
     nameKeyOf(name) {
-      return this.normalizePartName(name)
-        .replaceAll(/[-\/\s]/g, '');
+      return NAME_KEY_PREFIX +
+        this.normalizePartName(name).replaceAll(/[-\/\s]/g, '');
     }
 
     // MARK: データベースの読み込み
@@ -426,8 +429,14 @@
     }
 
     reportDatabase() {
+      let partWithName = 0;
+      for (const key in this.db.parts) {
+        if (key.startsWith(NAME_KEY_PREFIX)) {
+          partWithName++;
+        }
+      }
       debugLog(`注文情報: ${Object.keys(this.db.orders).length}件`);
-      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
+      debugLog(`部品情報: ${Object.keys(this.db.parts).length - partWithName} + ${partWithName}件`);
     }
   }
 
@@ -488,7 +497,7 @@
   function wrapWithParagraph(elem) {
     const p = document.createElement('p');
     p.style.margin = '5px';
-    if (typeof elem ==='string') {
+    if (typeof elem === 'string') {
       p.innerHTML = elem;
     }
     else {
