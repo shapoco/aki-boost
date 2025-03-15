@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.212
+// @version     1.0.226
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -402,14 +402,27 @@
       }
       {
         const link = document.createElement('a');
-        link.href = `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B      `;
+        link.href = this.getSearchUrl(part.name);
         link.textContent = "購入履歴から検索";
         link.title = LINK_TITLE;
         div.appendChild(link);
       }
       setBackgroundStyle(div);
-
       h1.parentElement.appendChild(div);
+
+      const items = Array.from(document.querySelectorAll('.js-enhanced-ecommerce-item'));
+      for (const item of items) {
+        const codeDl = item.querySelector('.block-bulk-purchase-b--purchase_qty');
+        const nameDiv = item.querySelector('.block-bulk-purchase-b--goods-name');
+        const code = item.querySelector('input[name="goods"]').value;
+        const name = this.normalizePartName(nameDiv.textContent);
+        const part = this.partByCode(code, name);
+        if (!part.orderIds || part.orderIds.length == 0) continue;
+        setBackgroundStyle(item);
+        item.style.borderRadius = '0';
+        const imageDiv = item.querySelector('.block-bulk-purchase-b--goods-image');
+        imageDiv.appendChild(this.createHistoryBanner(part));
+      }
 
       await this.saveDatabase();
     }
@@ -424,34 +437,11 @@
         if (!m) continue;
         const code = m[1];
         const part = this.partByCode(code, name);
-        if (part.orderIds && part.orderIds.length > 0) {
+        const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
+        if (purchaseCount > 0) {
           setBackgroundStyle(itemDl);
-
           const itemDt = itemDl.querySelector('.block-cart-i--goods-image');
-          const div = document.createElement('div');
-          div.style.backgroundColor = '#06c';
-          div.style.padding = '1px 5px';
-          div.style.position = 'absolute';
-          div.style.right = '0';
-          div.style.bottom = '0';
-          div.style.borderRadius = '4px';
-          div.style.fontSize = '10px';
-          div.style.color = '#fff';
-          let time = -1;
-          for (let orderId of part.orderIds) {
-            if (!(orderId in this.db.orders)) continue;
-            time = Math.max(time, this.db.orders[orderId].time);
-          }
-          if (time >= 0) {
-            div.innerText = prettyDate(time) + 'に購入';
-            div.title = new Date(time).toLocaleString() + '\n' + LINK_TITLE;
-          }
-          else {
-            div.innerText = part.orderIds.length + '回購入';
-            div.title = LINK_TITLE;
-
-          }
-          itemDt.appendChild(div);
+          itemDt.appendChild(this.createHistoryBanner(part));
         }
       }
       await this.saveDatabase();
@@ -476,6 +466,55 @@
         order.time = time;
       }
       return order;
+    }
+
+    // MARK: 商品画像の左下に付けるバナーを生成
+    createHistoryBanner(part) {
+      const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
+
+      const link = document.createElement('a');
+      link.href = this.getSearchUrl(part.name);
+      link.style.display = 'inline-block';
+      link.style.backgroundColor = '#06c';
+      link.style.padding = '1px 5px';
+      link.style.position = 'absolute';
+      link.style.right = '0';
+      link.style.bottom = '0';
+      link.style.borderRadius = '4px';
+      link.style.fontSize = '10px';
+      link.style.color = '#fff';
+
+      // 購入日
+      let timeList = [];
+      for (let orderId of part.orderIds) {
+        if (orderId in this.db.orders) {
+          timeList.push(this.db.orders[orderId].time);
+        }
+      }
+      timeList.sort((a, b) => b - a);
+
+      if (timeList.length == 0) {
+        // 購入日不明
+        link.textContent = `${part.orderIds.length} 回購入`;
+      }
+      else if (timeList.length == 1 && purchaseCount == 1) {
+        // 日付が分かっている 1 回だけ購入
+        link.textContent = `${prettyDate(timeList[0])}に購入`;
+      }
+      else {
+        // 複数回購入
+        link.textContent = `${prettyDate(timeList[0])} + ${purchaseCount - 1} 回購入`;
+      }
+
+      const timeStrs = timeList.map(t => `・${new Date(t).toLocaleDateString()}`);
+      link.title = `${timeStrs.join('\n')}\n${LINK_TITLE}`;
+
+      return link;
+    }
+
+    // 部品の検索用URLを生成
+    getSearchUrl(name) {
+      return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B`;
     }
 
     // MARK: 部品情報をIDから取得
