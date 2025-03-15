@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.152
+// @version     1.0.161
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -25,9 +25,9 @@
 
   class AkiFixer {
     constructor() {
-      this.settings = new Database();
+      this.db = new Database();
       this.menuWindow = document.createElement('div');
-      this.databaseInfoLabel = document.createElement('p');
+      this.databaseInfoLabel = document.createElement('span');
     }
 
     async start() {
@@ -49,6 +49,7 @@
       }
     }
 
+    // MARK: メニュー
     setupMenu() {
       const openButton = document.createElement('button');
       openButton.textContent = `⚙ ${APP_NAME}`;
@@ -67,7 +68,7 @@
       document.body.appendChild(openButton);
 
       this.menuWindow.style.position = 'fixed';
-      this.menuWindow.style.left = '30px';
+      this.menuWindow.style.left = '40px';
       this.menuWindow.style.bottom = '100px';
       this.menuWindow.style.zIndex = '10000';
       this.menuWindow.style.width = '250px';
@@ -76,13 +77,14 @@
       this.menuWindow.style.borderRadius = '5px';
       this.menuWindow.style.display = 'none';
       this.menuWindow.style.fontSize = '12px';
+      this.menuWindow.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
 
       const closeButton = document.createElement('button');
       closeButton.textContent = '×';
       closeButton.style.position = 'absolute';
       closeButton.style.right = '5px';
       closeButton.style.top = '5px';
-      closeButton.style.backgroundColor = '#f00';
+      closeButton.style.backgroundColor = '#c44';
       closeButton.style.color = '#fff';
       closeButton.style.border = 'none';
       closeButton.style.borderRadius = '3px';
@@ -94,21 +96,19 @@
       closeButton.style.height = '18px';
       this.menuWindow.appendChild(closeButton);
 
-      this.menuWindow.appendChild(this.databaseInfoLabel);
+      this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const resetButton = document.createElement('button');
-      resetButton.textContent = 'データベースをリセット';
-      const resetP = document.createElement('p');
-      resetP.appendChild(resetButton);
-      this.menuWindow.appendChild(resetP);
+      const resetButton = createButton('データベースをリセット');
+      this.menuWindow.appendChild(wrapWithParagraph(resetButton));
 
-      for (const p of this.menuWindow.children) {
-        const tagName = p.tagName;
-        if (tagName === 'P') {
-          p.style.margin = '5px';
-        }
-      }
+      const learnButton = createButton('購入履歴を読み込む');
+      this.menuWindow.appendChild(wrapWithParagraph(learnButton));
+
+      this.menuWindow.appendChild(wrapWithParagraph(
+        '※ 購入履歴を読み込む前に\n' +
+        '<a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a>\n' +
+        '済みであることを確認してください。'));
 
       document.body.appendChild(this.menuWindow);
 
@@ -116,16 +116,25 @@
         this.updateDatabaseInfo();
         this.menuWindow.style.display = this.menuWindow.style.display === 'none' ? 'block' : 'none';
       });
+
       closeButton.addEventListener('click', () => {
         this.menuWindow.style.display = 'none';
+      });
+
+      resetButton.addEventListener('click', async () => {
+        if (confirm('データベースをリセットしますか？')) {
+          this.db = new Database();
+          await this.saveDatabase();
+          this.updateDatabaseInfo();
+        }
       });
     }
 
     updateDatabaseInfo() {
       this.databaseInfoLabel.innerHTML =
         `${APP_NAME}<br>\n` +
-        `記憶している注文情報: ${Object.keys(this.settings.orders).length}件<br>` +
-        `記憶している部品情報: ${Object.keys(this.settings.parts).length}件`;
+        `記憶している注文情報: ${Object.keys(this.db.orders).length}件<br>` +
+        `記憶している部品情報: ${Object.keys(this.db.parts).length}件`;
     }
 
     // MARK: 購入履歴をスキャン
@@ -233,8 +242,8 @@
       const div = document.createElement('div');
       div.appendChild(document.createTextNode('購入履歴: '));
       for (let orderId of part.orderIds) {
-        if (!(orderId in this.settings.orders)) continue;
-        const order = this.settings.orders[orderId];
+        if (!(orderId in this.db.orders)) continue;
+        const order = this.db.orders[orderId];
         const link = document.createElement('a');
         link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
         link.textContent = new Date(order.time).toLocaleDateString();
@@ -281,8 +290,8 @@
           div.style.color = '#fff';
           let time = -1;
           for (let orderId of part.orderIds) {
-            if (!(orderId in this.settings.orders)) continue;
-            time = Math.max(time, this.settings.orders[orderId].time);
+            if (!(orderId in this.db.orders)) continue;
+            time = Math.max(time, this.db.orders[orderId].time);
           }
           if (time >= 0) {
             div.innerText = prettyDate(time) + 'に購入';
@@ -302,14 +311,14 @@
     // MARK: 注文情報をIDから取得
     orderById(id, time) {
       let order = new Order(id, time);
-      if (id in this.settings.orders) {
+      if (id in this.db.orders) {
         // 既知の注文の場合はその情報をベースにする
-        order = this.settings.orders[id];
+        order = this.db.orders[id];
       }
       else {
         // 新規注文の場合は登録
         debugLog(`新規注文情報: ${id}`);
-        this.settings.orders[id] = order;
+        this.db.orders[id] = order;
       }
       if (!order.time || order.time < time) {
         const oldTimeStr = order.time ? new Date(order.time).toLocaleString() : 'null';
@@ -322,22 +331,22 @@
 
     // MARK: 部品情報をIDから取得
     partByCode(code, name) {
-      if (!this.settings.parts) this.settings.parts = {};
+      if (!this.db.parts) this.db.parts = {};
 
       let part = new Part(code, name);
 
-      if (code in this.settings.parts) {
-        part = this.settings.parts[code];
+      if (code in this.db.parts) {
+        part = this.db.parts[code];
       }
       else {
         // 新規部品の場合は登録
         debugLog(`新規部品情報: 通販コード=${code}, 部品名=${name}`);
-        this.settings.parts[code] = part;
+        this.db.parts[code] = part;
       }
 
       const nameKey = this.nameKeyOf(name);
-      if (nameKey in this.settings.parts) {
-        let byName = this.settings.parts[nameKey];
+      if (nameKey in this.db.parts) {
+        let byName = this.db.parts[nameKey];
         if (!byName.code) {
           debugLog(`部品名を通販コードにリンク: ${byName.name} --> ${code}`);
           byName.code = code;
@@ -350,23 +359,23 @@
 
     // MARK: 部品情報を名前から取得
     partByName(name) {
-      if (!this.settings.parts) this.settings.parts = {};
+      if (!this.db.parts) this.db.parts = {};
 
       let part = new Part(null, name);
 
       // ハッシュで参照
       const nameKey = this.nameKeyOf(name);
-      if (nameKey in this.settings.parts) {
-        part = this.settings.parts[nameKey];
-        if (part.code && !part.code.startsWith(NAME_KEY_PREFIX) && part.code in this.settings.parts) {
+      if (nameKey in this.db.parts) {
+        part = this.db.parts[nameKey];
+        if (part.code && !part.code.startsWith(NAME_KEY_PREFIX) && part.code in this.db.parts) {
           // 品番が登録済みの場合はその情報を返す
-          part = this.settings.parts[part.code];
+          part = this.db.parts[part.code];
         }
       }
       else {
         // 新規部品の場合は登録
         debugLog(`新しい部品名: ${name}`);
-        this.settings.parts[nameKey] = part;
+        this.db.parts[nameKey] = part;
       }
       return part;
     }
@@ -389,12 +398,12 @@
         if (json) {
           if (json.orders) {
             for (const key in json.orders) {
-              this.settings.orders[key] = Object.assign(new Order(null), json.orders[key]);
+              this.db.orders[key] = Object.assign(new Order(null), json.orders[key]);
             }
           }
           if (json.parts) {
             for (const key in json.parts) {
-              this.settings.parts[key] = Object.assign(new Part(null, null), json.parts[key]);
+              this.db.parts[key] = Object.assign(new Part(null, null), json.parts[key]);
             }
           }
         }
@@ -409,7 +418,7 @@
     async saveDatabase() {
       try {
         this.reportDatabase();
-        await GM.setValue(SETTING_KEY, JSON.stringify(this.settings));
+        await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
       }
       catch (e) {
         debugError(`データベースの保存に失敗しました: ${e}`);
@@ -417,8 +426,8 @@
     }
 
     reportDatabase() {
-      debugLog(`注文情報: ${Object.keys(this.settings.orders).length}件`);
-      debugLog(`部品情報: ${Object.keys(this.settings.parts).length}件`);
+      debugLog(`注文情報: ${Object.keys(this.db.orders).length}件`);
+      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
     }
   }
 
@@ -465,6 +474,27 @@
       }
       other.orderIds = [];
     }
+  }
+
+  function createButton(text) {
+    const button = document.createElement('button');
+    button.textContent = text;
+    button.style.boxSizing = 'border-box';
+    button.style.width = '100%';
+    button.style.cursor = 'pointer';
+    return button;
+  }
+
+  function wrapWithParagraph(elem) {
+    const p = document.createElement('p');
+    p.style.margin = '5px';
+    if (typeof elem ==='string') {
+      p.innerHTML = elem;
+    }
+    else {
+      p.appendChild(elem);
+    }
+    return p;
   }
 
   function setBackgroundStyle(elem) {
