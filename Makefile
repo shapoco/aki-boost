@@ -2,7 +2,7 @@
 
 TEST_PORT = 51680
 
-APP_NAME = aki-fixer
+APP_NAME = aki-boost
 JS_NAME = $(APP_NAME).user.js
 DIST_URL = "https://github.com/shapoco/$(APP_NAME)/raw/refs/heads/main/dist/"
 

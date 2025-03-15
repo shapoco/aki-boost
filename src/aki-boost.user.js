@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        Aki Fixer (Debug)
+// @name        Aki Boost (Debug)
 // @namespace   http://localhost:51680/
-// @updateURL   http://localhost:51680/aki-fixer.user.js
-// @downloadURL http://localhost:51680/aki-fixer.user.js
+// @updateURL   http://localhost:51680/aki-boost.user.js
+// @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
 // @version     1.0.161
@@ -18,12 +18,12 @@
 
   const DEBUG_MODE = true;
 
-  const APP_NAME = 'Aki Fixer';
-  const SETTING_KEY = 'akifix_settings';
-  const NAME_KEY_PREFIX = 'akifix-partname-';
+  const APP_NAME = 'Aki Boost';
+  const SETTING_KEY = 'akibst_settings';
+  const NAME_KEY_PREFIX = 'akibst-partname-';
   const LINK_TITLE = `${APP_NAME} によるアノテーション`;
 
-  class AkiFixer {
+  class AkiBoost {
     constructor() {
       this.db = new Database();
       this.menuWindow = document.createElement('div');
@@ -574,7 +574,7 @@
     }
   }
 
-  window.akifix = new AkiFixer();
-  window.onload = async () => await window.akifix.start();
+  window.akibst = new AkiBoost();
+  window.onload = async () => await window.akibst.start();
 
 })();
