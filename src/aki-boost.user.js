@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.226
+// @version     1.0.260
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -22,6 +22,13 @@
   const SETTING_KEY = 'akibst_settings';
   const NAME_KEY_PREFIX = 'akibst-partname-';
   const LINK_TITLE = `${APP_NAME} によるアノテーション`;
+
+  const CART_ITEM_LIFE_TIME = 7 * 86400 * 1000;
+
+  const COLOR_LIGHT_HISTORY = '#def';
+  const COLOR_DARK_HISTORY = '#06c';
+  const COLOR_LIGHT_IN_CART = '#fde';
+  const COLOR_DARK_IN_CART = '#e0b';
 
   class AkiBoost {
     constructor() {
@@ -45,11 +52,14 @@
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
         await this.scanHistoryDetail(document);
       }
+      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/cart/cart.aspx')) {
+        await this.scanCart(document);
+      }
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
-        await this.fixItemPage();
+        await this.fixItemPage(document);
       }
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
-        await this.fixCatalog();
+        await this.fixCatalog(document);
       }
     }
 
@@ -68,7 +78,7 @@
       this.menuOpenButton.style.bottom = '100px';
       this.menuOpenButton.style.zIndex = '10000';
       this.menuOpenButton.style.padding = '10px 5px';
-      this.menuOpenButton.style.backgroundColor = '#06c';
+      this.menuOpenButton.style.backgroundColor = COLOR_DARK_HISTORY;
       this.menuOpenButton.style.borderStyle = 'none';
       this.menuOpenButton.style.borderRadius = '0 5px 5px 0';
       this.menuOpenButton.style.color = '#fff';
@@ -283,7 +293,8 @@
     updateDatabaseInfo() {
       this.databaseInfoLabel.innerHTML =
         `記憶している注文情報: ${Object.keys(this.db.orders).length}件<br>` +
-        `記憶している部品情報: ${Object.keys(this.db.parts).length}件`;
+        `記憶している部品情報: ${Object.keys(this.db.parts).length}件<br>` +
+        `カートのログ: ${Object.keys(this.db.cart).length}件`;
     }
 
     // MARK: 購入履歴をスキャン
@@ -299,12 +310,12 @@
         const itemDivs = Array.from(table.querySelectorAll('.block-purchase-history--goods-name'));
         for (let itemDiv of itemDivs) {
           // 部品情報の取得
-          const wideName = this.normalizePartName(itemDiv.textContent);
+          const wideName = normalizePartName(itemDiv.textContent);
           if (!wideName) {
             debugError(`部品名の要素が見つかりませんでした`);
             continue;
           }
-          const partName = this.normalizePartName(wideName);
+          const partName = normalizePartName(wideName);
           if (partName != wideName) {
             debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
           }
@@ -327,7 +338,7 @@
             a.textContent = '検索';
             a.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
           }
-          setBackgroundStyle(a);
+          setBackgroundStyle(a, COLOR_LIGHT_HISTORY);
           itemDiv.appendChild(a);
           itemDiv.appendChild(document.createTextNode(partName));
         }
@@ -347,7 +358,7 @@
         const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partCode = partCodeDiv.textContent.trim();
         const wideName = partRow.querySelector('.block-purchase-history-detail--goods-name').textContent;
-        const partName = this.normalizePartName(wideName);
+        const partName = normalizePartName(wideName);
         if (partName != wideName) {
           debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
         }
@@ -371,18 +382,39 @@
       await this.saveDatabase();
     }
 
+    // MARK: カートをスキャン
+    async scanCart(doc) {
+      const trs = Array.from(doc.querySelectorAll('.block-cart--goods-list'));
+      let index = 1;
+      // 一旦全ての商品をカートから外す
+      for (const item of Object.values(this.db.cart)) {
+        item.isInCart = false;
+      }
+      // 表示されている商品をカートに追加
+      for (const tr of trs) {
+        const code = tr.querySelector('.js-enhanced-ecommerce-goods').textContent.trim();
+        const name = normalizePartName(tr.querySelector('.js-enhanced-ecommerce-goods-name').textContent);
+        const qty = parseInt(tr.querySelector(`input[name="qty${index}"]`).value);
+        const part = this.partByCode(code, name);
+        const item = this.cartItemByCode(code, qty);
+        item.isInCart = true;
+        index++;
+      }
+      await this.saveDatabase();
+    }
+
     // MARK: 商品ページを修正
-    async fixItemPage() {
-      const code = document.querySelector('#hidden_goods').value;
-      const wideName = document.querySelector('#hidden_goods_name').value;
-      const name = this.normalizePartName(wideName);
+    async fixItemPage(doc) {
+      const code = doc.querySelector('#hidden_goods').value;
+      const wideName = doc.querySelector('#hidden_goods_name').value;
+      const name = normalizePartName(wideName);
       if (name != wideName) {
         debugLog(`部品名正規化: '${wideName}' -> '${name}'`);
       }
 
       const part = this.partByCode(code, name);
 
-      const h1 = document.querySelector('.block-goods-name--text');
+      const h1 = doc.querySelector('.block-goods-name--text');
       if (!h1) {
         debugError(`部品名が見つかりません`);
         return;
@@ -407,41 +439,65 @@
         link.title = LINK_TITLE;
         div.appendChild(link);
       }
-      setBackgroundStyle(div);
+      setBackgroundStyle(div, COLOR_LIGHT_HISTORY);
+      if (code in this.db.cart) {
+        const item = this.db.cart[code];
+        if (item.isInCart && item.quantity > 0) {
+          div.appendChild(document.createTextNode(' | '));
+          const span = document.createElement('span');
+          span.textContent = `🛒 カートに入っています (${item.quantity} 個)`;
+          span.style.color = COLOR_DARK_IN_CART;
+          div.appendChild(span);
+          setBackgroundStyle(div, COLOR_LIGHT_IN_CART);
+        }
+      }
       h1.parentElement.appendChild(div);
 
-      const items = Array.from(document.querySelectorAll('.js-enhanced-ecommerce-item'));
-      for (const item of items) {
-        const codeDl = item.querySelector('.block-bulk-purchase-b--purchase_qty');
-        const nameDiv = item.querySelector('.block-bulk-purchase-b--goods-name');
-        const code = item.querySelector('input[name="goods"]').value;
-        const name = this.normalizePartName(nameDiv.textContent);
+      const itemDivs = Array.from(doc.querySelectorAll('.js-enhanced-ecommerce-item'));
+      for (const itemDiv of itemDivs) {
+        const codeDl = itemDiv.querySelector('.block-bulk-purchase-b--purchase_qty');
+        const nameDiv = itemDiv.querySelector('.block-bulk-purchase-b--goods-name');
+        const code = itemDiv.querySelector('input[name="goods"]').value;
+        const name = normalizePartName(nameDiv.textContent);
         const part = this.partByCode(code, name);
-        if (!part.orderIds || part.orderIds.length == 0) continue;
-        setBackgroundStyle(item);
-        item.style.borderRadius = '0';
-        const imageDiv = item.querySelector('.block-bulk-purchase-b--goods-image');
-        imageDiv.appendChild(this.createHistoryBanner(part));
+        const imageDiv = itemDiv.querySelector('.block-bulk-purchase-b--goods-image');
+        if (part.orderIds && part.orderIds.length > 0) {
+          setBackgroundStyle(itemDiv, COLOR_LIGHT_HISTORY, false);
+          imageDiv.appendChild(this.createHistoryBanner(part));
+        }
+        if (code in this.db.cart) {
+          const item = this.db.cart[code];
+          if (item.isInCart) {
+            setBackgroundStyle(itemDiv, COLOR_LIGHT_IN_CART, false);
+            imageDiv.appendChild(this.createCartBanner(part));
+          }
+        }
       }
 
       await this.saveDatabase();
     }
 
     // MARK: カタログページを修正
-    async fixCatalog() {
-      const itemDls = Array.from(document.querySelectorAll('.block-cart-i--goods'));
+    async fixCatalog(doc) {
+      const itemDls = Array.from(doc.querySelectorAll('.block-cart-i--goods'));
       for (const itemDl of itemDls) {
         const link = itemDl.querySelector('.js-enhanced-ecommerce-goods-name');
-        const name = this.normalizePartName(link.title);
+        const name = normalizePartName(link.title);
         const m = link.href.match(/\/catalog\/g\/g(\d+)\//);
         if (!m) continue;
         const code = m[1];
         const part = this.partByCode(code, name);
-        const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
-        if (purchaseCount > 0) {
-          setBackgroundStyle(itemDl);
-          const itemDt = itemDl.querySelector('.block-cart-i--goods-image');
+        const itemDt = itemDl.querySelector('.block-cart-i--goods-image');
+        if (part.orderIds && part.orderIds.length > 0) {
+          setBackgroundStyle(itemDl, COLOR_LIGHT_HISTORY);
           itemDt.appendChild(this.createHistoryBanner(part));
+        }
+        if (code in this.db.cart) {
+          const item = this.db.cart[code];
+          if (item.isInCart && item.quantity > 0) {
+            setBackgroundStyle(itemDl, COLOR_LIGHT_IN_CART);
+            itemDt.appendChild(this.createCartBanner(part));
+          }
         }
       }
       await this.saveDatabase();
@@ -475,7 +531,7 @@
       const link = document.createElement('a');
       link.href = this.getSearchUrl(part.name);
       link.style.display = 'inline-block';
-      link.style.backgroundColor = '#06c';
+      link.style.backgroundColor = COLOR_DARK_HISTORY;
       link.style.padding = '1px 5px';
       link.style.position = 'absolute';
       link.style.right = '0';
@@ -510,6 +566,33 @@
       link.title = `${timeStrs.join('\n')}\n${LINK_TITLE}`;
 
       return link;
+    }
+
+    // MARK: 商品画像の左下に付けるバナーを生成
+    createCartBanner(part) {
+      const span = document.createElement('span');
+      span.href = this.getSearchUrl(part.name);
+      span.style.display = 'inline-block';
+      span.style.backgroundColor = COLOR_DARK_IN_CART;
+      span.style.padding = '1px 5px';
+      span.style.position = 'absolute';
+      span.style.right = '0';
+      span.style.top = '0';
+      span.style.borderRadius = '4px';
+      span.style.fontSize = '10px';
+      span.style.color = '#fff';
+
+      let qty = 0;
+      if (part.code in this.db.cart) {
+        const item = this.db.cart[part.code];
+        if (item.isInCart) {
+          qty = item.quantity;
+        }
+      }
+      span.textContent = `🛒${qty}`;
+      span.title = LINK_TITLE;
+
+      return span;
     }
 
     // 部品の検索用URLを生成
@@ -550,8 +633,6 @@
 
     // MARK: 部品情報を名前から取得
     partByName(name) {
-      if (!this.db.parts) this.db.parts = {};
-
       let part = new Part(null, name);
 
       // ハッシュで参照
@@ -571,32 +652,65 @@
       return part;
     }
 
-    // MARK: 部品名を正規化
-    normalizePartName(name) {
-      return toNarrow(name).trim();
+    // MARK: カートの商品を通販コードから取得
+    cartItemByCode(code, qty) {
+      const now = new Date().getTime();
+      let item = new CartItem(code, qty, now);
+      if (code in this.db.cart) {
+        // 既知の商品の場合はその情報をベースにする
+        item = this.db.cart[code];
+        item.isInCart = true;
+        item.timestamp = now;
+        item.quantity = qty;
+      }
+      else {
+        // 新規商品の場合は登録
+        debugLog(`新しい商品: ${code}`);
+        this.db.cart[code] = item;
+      }
+      return item;
     }
 
     // MARK: 部品名をハッシュ化
     nameKeyOf(name) {
       return NAME_KEY_PREFIX +
-        this.normalizePartName(name).replaceAll(/[-\/\s]/g, '');
+        normalizePartName(name).replaceAll(/[-\/\s]/g, '');
     }
 
     // MARK: データベースの読み込み
     async loadDatabase() {
       try {
         const json = JSON.parse(await GM.getValue(SETTING_KEY));
+        const now = new Date().getTime();
         if (json) {
           if (json.orders) {
-            for (const key in json.orders) {
-              this.db.orders[key] = Object.assign(new Order(null), json.orders[key]);
+            for (const id in json.orders) {
+              this.db.orders[id] = Object.assign(new Order(null), json.orders[id]);
             }
           }
           if (json.parts) {
-            for (const key in json.parts) {
-              this.db.parts[key] = Object.assign(new Part(null, null), json.parts[key]);
+            for (const code in json.parts) {
+              this.db.parts[code] = Object.assign(new Part(null, null), json.parts[code]);
             }
           }
+          if (json.cart) {
+            for (const code in json.cart) {
+              const item = Object.assign(new CartItem(code, 0, now), json.cart[code]);
+              debugLog(`カートの商品を復元: ${item.code} ${item.timestamp}, ${now}`);
+              if (item.timestamp && item.timestamp > now - CART_ITEM_LIFE_TIME) {
+                this.db.cart[code] = item;
+              }
+            }
+
+            const countSpan = document.querySelector('.block-headernav--cart-count');
+            if (!countSpan || parseInt(countSpan.textContent) <= 0) {
+              // カートの商品数がゼロになっている場合は全商品をカートから外す
+              for (const item of Object.values(this.db.cart)) {
+                item.isInCart = false;
+              }
+            }
+          }
+
         }
         this.reportDatabase();
       }
@@ -633,6 +747,7 @@
     constructor() {
       this.orders = {};
       this.parts = {};
+      this.cart = {};
     }
   }
 
@@ -673,11 +788,21 @@
     }
   }
 
+  // MARK: 買い物かごのアイテム
+  class CartItem {
+    constructor(code, qty, ts) {
+      this.code = code;
+      this.quantity = qty;
+      this.timestamp = ts;
+      this.isInCart = qty > 0;
+    }
+  }
+
   function createWindow(title, width = '300px') {
     const div = document.createElement('div');
     div.style.zIndex = '10000';
     div.style.width = width;
-    div.style.backgroundColor = '#def';
+    div.style.backgroundColor = COLOR_LIGHT_HISTORY;
     div.style.border = '1px solid #06c';
     div.style.borderRadius = '5px';
     div.style.fontSize = '12px';
@@ -685,7 +810,7 @@
 
     const caption = document.createElement('div');
     caption.textContent = title;
-    caption.style.backgroundColor = '#06c';
+    caption.style.backgroundColor = COLOR_DARK_HISTORY;
     caption.style.color = '#fff';
     caption.style.padding = '5px';
     div.appendChild(caption);
@@ -721,9 +846,9 @@
     return p;
   }
 
-  function setBackgroundStyle(elem) {
-    elem.style.backgroundColor = '#def';
-    elem.style.borderRadius = '5px';
+  function setBackgroundStyle(elem, color, rounded = true) {
+    elem.style.backgroundColor = color;
+    if (rounded) elem.style.borderRadius = '5px';
     if (elem.tagName === 'DL') {
       // do nothing
     }
@@ -760,6 +885,11 @@
     if (month < 1) return `${Math.round(days)}日前`;
     if (years < 1) return `${Math.round(month * 10) / 10}ヶ月前`;
     return `${Math.round(years * 10) / 10}年前`;
+  }
+
+  // MARK: 部品名を正規化
+  function normalizePartName(name) {
+    return toNarrow(name).trim();
   }
 
   function toNarrow(orig) {
