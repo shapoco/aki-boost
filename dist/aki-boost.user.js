@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.209
+// @version     1.0.210
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -190,6 +190,8 @@
 
       try {
         const PAGE_STRIDE = DEBUG_MODE ? 5 : 100;
+
+        status.textContent = `オーダー ID を列挙しています...`;
         let doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
 
         let numOrders = -1;
