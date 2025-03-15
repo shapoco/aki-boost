@@ -17,6 +17,7 @@ deploy:
 	cp -f "$(SRC_DIR)/$(JS_NAME)" "$(DIST_DIR)/."
 	sed -i "$(DIST_DIR)/$(JS_NAME)" -e "s#http://localhost:[0-9]\+/#$(DIST_URL)#g"
 	sed -i "$(DIST_DIR)/$(JS_NAME)" -e "s# (Debug)##g"
+	sed -i "$(DIST_DIR)/$(JS_NAME)" -e "s#const DEBUG_MODE = true;#const DEBUG_MODE = false;#g"
 
 test:
 	python3 -m http.server -d "$(SRC_DIR)" "$(TEST_PORT)"

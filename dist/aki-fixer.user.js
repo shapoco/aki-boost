@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-fixer/raw/refs/heads/main/dist/aki-fixer.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.126
+// @version     1.0.152
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -16,6 +16,8 @@
 (function () {
   'use strict';
 
+  const DEBUG_MODE = false;
+
   const APP_NAME = 'Aki Fixer';
   const SETTING_KEY = 'akifix_settings';
   const NAME_KEY_PREFIX = 'akifix-partname-';
@@ -24,24 +26,106 @@
   class AkiFixer {
     constructor() {
       this.settings = new Database();
+      this.menuWindow = document.createElement('div');
+      this.databaseInfoLabel = document.createElement('p');
     }
 
-    start() {
-      window.onload = async () => {
-        await this.loadDatabase();
-        if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
-          await this.scanHistory();
-        }
-        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
-          await this.scanHistoryDetail();
-        }
-        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
-          await this.fixItemPage();
-        }
-        else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
-          await this.fixCatalog();
+    async start() {
+      await this.loadDatabase();
+
+      this.setupMenu();
+
+      if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
+        await this.scanHistory();
+      }
+      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
+        await this.scanHistoryDetail();
+      }
+      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
+        await this.fixItemPage();
+      }
+      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
+        await this.fixCatalog();
+      }
+    }
+
+    setupMenu() {
+      const openButton = document.createElement('button');
+      openButton.textContent = `⚙ ${APP_NAME}`;
+      openButton.style.writingMode = 'vertical-rl';
+      openButton.style.position = 'fixed';
+      openButton.style.left = '0px';
+      openButton.style.bottom = '100px';
+      openButton.style.zIndex = '10000';
+      openButton.style.padding = '10px 5px';
+      openButton.style.backgroundColor = '#06c';
+      openButton.style.borderStyle = 'none';
+      openButton.style.borderRadius = '0 5px 5px 0';
+      openButton.style.color = '#fff';
+      openButton.style.fontSize = '12px';
+      openButton.style.cursor = 'pointer';
+      document.body.appendChild(openButton);
+
+      this.menuWindow.style.position = 'fixed';
+      this.menuWindow.style.left = '30px';
+      this.menuWindow.style.bottom = '100px';
+      this.menuWindow.style.zIndex = '10000';
+      this.menuWindow.style.width = '250px';
+      this.menuWindow.style.backgroundColor = '#def';
+      this.menuWindow.style.border = '1px solid #06c';
+      this.menuWindow.style.borderRadius = '5px';
+      this.menuWindow.style.display = 'none';
+      this.menuWindow.style.fontSize = '12px';
+
+      const closeButton = document.createElement('button');
+      closeButton.textContent = '×';
+      closeButton.style.position = 'absolute';
+      closeButton.style.right = '5px';
+      closeButton.style.top = '5px';
+      closeButton.style.backgroundColor = '#f00';
+      closeButton.style.color = '#fff';
+      closeButton.style.border = 'none';
+      closeButton.style.borderRadius = '3px';
+      closeButton.style.padding = '2px 5px';
+      closeButton.style.cursor = 'pointer';
+      closeButton.style.fontSize = '12px';
+      closeButton.style.lineHeight = '12px';
+      closeButton.style.width = '18px';
+      closeButton.style.height = '18px';
+      this.menuWindow.appendChild(closeButton);
+
+      this.menuWindow.appendChild(this.databaseInfoLabel);
+      this.updateDatabaseInfo();
+
+      const resetButton = document.createElement('button');
+      resetButton.textContent = 'データベースをリセット';
+      const resetP = document.createElement('p');
+      resetP.appendChild(resetButton);
+      this.menuWindow.appendChild(resetP);
+
+      for (const p of this.menuWindow.children) {
+        const tagName = p.tagName;
+        if (tagName === 'P') {
+          p.style.margin = '5px';
         }
       }
+
+      document.body.appendChild(this.menuWindow);
+
+      openButton.addEventListener('click', () => {
+        this.updateDatabaseInfo();
+        this.menuWindow.style.display = this.menuWindow.style.display === 'none' ? 'block' : 'none';
+      });
+      closeButton.addEventListener('click', () => {
+        this.menuWindow.style.display = 'none';
+      });
+    }
+
+    updateDatabaseInfo() {
+      this.databaseInfoLabel.innerHTML =
+        `${APP_NAME}<br>\n` +
+        `記憶している注文情報: ${Object.keys(this.settings.orders).length}件<br>` +
+        `記憶している部品情報: ${Object.keys(this.settings.parts).length}件`;
     }
 
     // MARK: 購入履歴をスキャン
@@ -59,25 +143,25 @@
           // 部品情報の取得
           const wideName = this.normalizePartName(itemDiv.textContent);
           if (!wideName) {
-            console.error(`[${APP_NAME}] part name not found`);
+            debugError(`部品名の要素が見つかりませんでした`);
             continue;
           }
           const partName = this.normalizePartName(wideName);
           if (partName != wideName) {
-            console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${partName}'`);
+            debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
           }
 
           const part = this.partByName(partName);
           part.linkOrder(id);
-          order.linkPart(part.id);
+          order.linkPart(part.code);
 
           itemDiv.innerHTML = '';
           const a = document.createElement('a');
           a.title = LINK_TITLE;
-          if (part.id && !part.id.startsWith(NAME_KEY_PREFIX)) {
+          if (part.code && !part.code.startsWith(NAME_KEY_PREFIX)) {
             // 商品コードが分かる場合はリンクを張る
-            a.textContent = part.id;
-            a.href = `https://akizukidenshi.com/catalog/g/g${part.id}/`;
+            a.textContent = part.code;
+            a.href = `https://akizukidenshi.com/catalog/g/g${part.code}/`;
           }
           else {
             // 商品コードが分からない場合は検索リンクにする
@@ -102,47 +186,47 @@
 
       let order = this.orderById(orderId, time);
       for (let partRow of partRows) {
-        const partIdDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
-        const partId = partIdDiv.textContent.trim();
+        const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
+        const partCode = partCodeDiv.textContent.trim();
         const wideName = partRow.querySelector('.block-purchase-history-detail--goods-name').textContent;
         const partName = this.normalizePartName(wideName);
         if (partName != wideName) {
-          console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${partName}'`);
+          debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
         }
 
-        if (!partId || !partName) {
-          console.error(`[${APP_NAME}] part ID or name not found`);
+        if (!partCode || !partName) {
+          debugError(`通販コードまたは部品名が見つかりません`);
           continue;
         }
-        let part = this.partById(partId, partName);
-        order.linkPart(partId);
+        let part = this.partByCode(partCode, partName);
+        order.linkPart(partCode);
         part.linkOrder(orderId);
 
         // ID にリンクを張る
-        partIdDiv.innerHTML = '';
+        partCodeDiv.innerHTML = '';
         const a = document.createElement('a');
-        a.href = `https://akizukidenshi.com/catalog/g/g${part.id}/`;
-        a.textContent = part.id;
+        a.href = `https://akizukidenshi.com/catalog/g/g${part.code}/`;
+        a.textContent = part.code;
         a.title = LINK_TITLE;
-        partIdDiv.appendChild(a);
+        partCodeDiv.appendChild(a);
       }
       await this.saveDatabase();
     }
 
     // MARK: 商品ページを修正
     async fixItemPage() {
-      const id = document.querySelector('#hidden_goods').value;
+      const code = document.querySelector('#hidden_goods').value;
       const wideName = document.querySelector('#hidden_goods_name').value;
       const name = this.normalizePartName(wideName);
       if (name != wideName) {
-        console.log(`[${APP_NAME}] part name normaliezed: '${wideName}' -> '${name}'`);
+        debugLog(`部品名正規化: '${wideName}' -> '${name}'`);
       }
 
-      const part = this.partById(id, name);
+      const part = this.partByCode(code, name);
 
       const h1 = document.querySelector('.block-goods-name--text');
       if (!h1) {
-        console.error(`[${APP_NAME}] item name not found`);
+        debugError(`部品名が見つかりません`);
         return;
       }
 
@@ -180,8 +264,8 @@
         const name = this.normalizePartName(link.title);
         const m = link.href.match(/\/catalog\/g\/g(\d+)\//);
         if (!m) continue;
-        const id = m[1];
-        const part = this.partById(id, name);
+        const code = m[1];
+        const part = this.partByCode(code, name);
         if (part.orderIds && part.orderIds.length > 0) {
           setBackgroundStyle(itemDl);
 
@@ -224,39 +308,39 @@
       }
       else {
         // 新規注文の場合は登録
-        console.log(`[${APP_NAME}] new order ID: ${id}`);
+        debugLog(`新規注文情報: ${id}`);
         this.settings.orders[id] = order;
       }
       if (!order.time || order.time < time) {
         const oldTimeStr = order.time ? new Date(order.time).toLocaleString() : 'null';
         const newTimeStr = new Date(time).toLocaleString();
-        console.log(`[${APP_NAME}] order time updated: ${oldTimeStr} --> ${newTimeStr}`);
+        debugLog(`注文日時更新: ${oldTimeStr} --> ${newTimeStr}`);
         order.time = time;
       }
       return order;
     }
 
     // MARK: 部品情報をIDから取得
-    partById(id, name) {
+    partByCode(code, name) {
       if (!this.settings.parts) this.settings.parts = {};
 
-      let part = new Part(id, name);
+      let part = new Part(code, name);
 
-      if (id in this.settings.parts) {
-        part = this.settings.parts[id];
+      if (code in this.settings.parts) {
+        part = this.settings.parts[code];
       }
       else {
         // 新規部品の場合は登録
-        console.log(`[${APP_NAME}] new part ID: ${id}`);
-        this.settings.parts[id] = part;
+        debugLog(`新規部品情報: 通販コード=${code}, 部品名=${name}`);
+        this.settings.parts[code] = part;
       }
 
       const nameKey = this.nameKeyOf(name);
       if (nameKey in this.settings.parts) {
         let byName = this.settings.parts[nameKey];
-        if (!byName.id) {
-          console.log(`[${APP_NAME}] part name linked to ID: ${byName.name} --> ${id}`);
-          byName.id = id;
+        if (!byName.code) {
+          debugLog(`部品名を通販コードにリンク: ${byName.name} --> ${code}`);
+          byName.code = code;
         }
         part.migrateFrom(byName);
       }
@@ -274,14 +358,14 @@
       const nameKey = this.nameKeyOf(name);
       if (nameKey in this.settings.parts) {
         part = this.settings.parts[nameKey];
-        if (part.id && !part.id.startsWith(NAME_KEY_PREFIX) && part.id in this.settings.parts) {
+        if (part.code && !part.code.startsWith(NAME_KEY_PREFIX) && part.code in this.settings.parts) {
           // 品番が登録済みの場合はその情報を返す
-          part = this.settings.parts[part.id];
+          part = this.settings.parts[part.code];
         }
       }
       else {
         // 新規部品の場合は登録
-        console.log(`[${APP_NAME}] new part name: ${name}`);
+        debugLog(`新しい部品名: ${name}`);
         this.settings.parts[nameKey] = part;
       }
       return part;
@@ -314,22 +398,27 @@
             }
           }
         }
+        this.reportDatabase();
       }
       catch (e) {
-        console.error(`[${APP_NAME}] ${e}`);
+        debugError(`データベースの読み込みに失敗しました: ${e}`);
       }
     }
 
     // MARK: データベースの保存
     async saveDatabase() {
       try {
-        console.log(`[${APP_NAME}] num orders: ${Object.keys(this.settings.orders).length}`);
-        console.log(`[${APP_NAME}] num parts: ${Object.keys(this.settings.parts).length}`);
+        this.reportDatabase();
         await GM.setValue(SETTING_KEY, JSON.stringify(this.settings));
       }
       catch (e) {
-        console.error(`[${APP_NAME}] ${e}`);
+        debugError(`データベースの保存に失敗しました: ${e}`);
       }
+    }
+
+    reportDatabase() {
+      debugLog(`注文情報: ${Object.keys(this.settings.orders).length}件`);
+      debugLog(`部品情報: ${Object.keys(this.settings.parts).length}件`);
     }
   }
 
@@ -346,27 +435,27 @@
     constructor(id, time) {
       this.id = id;
       this.time = time;
-      this.partIds = [];
+      this.itemCodes = [];
     }
 
-    linkPart(partId) {
-      if (this.partIds.includes(partId)) return;
-      console.log(`[${APP_NAME}] order linked to part: ${this.id} --> ${partId}`);
-      this.partIds.push(partId);
+    linkPart(itemCode) {
+      if (this.itemCodes.includes(itemCode)) return;
+      debugLog(`注文情報に部品を追加: ${this.id} --> ${itemCode}`);
+      this.itemCodes.push(itemCode);
     }
   }
 
   // MARK: 部品情報
   class Part {
-    constructor(id, name) {
-      this.id = id;
+    constructor(code, name) {
+      this.code = code;
       this.name = name;
       this.orderIds = [];
     }
 
     linkOrder(orderId) {
       if (this.orderIds.includes(orderId)) return;
-      console.log(`[${APP_NAME}] part linked to order: ${this.id} --> ${orderId}`);
+      debugLog(`部品情報に注文情報をリンク: ${this.code} --> ${orderId}`);
       this.orderIds.push(orderId);
     }
 
@@ -408,7 +497,7 @@
     }
     return t;
   }
-  
+
   function prettyDate(t) {
     const days = (new Date().getTime() - t) / (1000 * 86400);
     const years = days / 365.2425;
@@ -443,6 +532,19 @@
     return ret;
   }
 
+  function debugLog(msg) {
+    if (DEBUG_MODE) {
+      console.log(`[${APP_NAME}] ${msg}`);
+    }
+  }
+
+  function debugError(msg) {
+    if (DEBUG_MODE) {
+      debugLog(`ERROR: ${msg}`);
+    }
+  }
+
   window.akifix = new AkiFixer();
-  window.akifix.start();
+  window.onload = async () => await window.akifix.start();
+
 })();
