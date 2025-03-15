@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.211
+// @version     1.0.212
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -101,9 +101,6 @@
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const resetButton = createButton('データベースをリセット', '100%');
-      this.menuWindow.appendChild(wrapWithParagraph(resetButton));
-
       const learnButton = createButton('購入履歴を読み込む', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(learnButton));
       if (!this.isLoggedIn) {
@@ -111,6 +108,9 @@
         this.menuWindow.appendChild(wrapWithParagraph(
           '※ 購入履歴を読み込む前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
       }
+
+      const resetButton = createButton('データベースをリセット', '100%');
+      this.menuWindow.appendChild(wrapWithParagraph(resetButton));
 
       document.body.appendChild(this.menuWindow);
 
