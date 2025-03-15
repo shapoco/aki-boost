@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.260
+// @version     1.0.266
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -325,21 +325,29 @@
           order.linkPart(part.code);
 
           itemDiv.innerHTML = '';
-          const a = document.createElement('a');
-          a.title = LINK_TITLE;
+          const link = document.createElement('a');
           if (part.code && !part.code.startsWith(NAME_KEY_PREFIX)) {
             // 商品コードが分かる場合はリンクを張る
-            a.textContent = part.code;
-            a.href = `https://akizukidenshi.com/catalog/g/g${part.code}/`;
+            link.textContent = part.code;
+            link.href = `https://akizukidenshi.com/catalog/g/g${part.code}/`;
           }
           else {
             // 商品コードが分からない場合は検索リンクにする
             const keyword = partName.replaceAll(/\s*\([^\)]+入\)$/g, '');
-            a.textContent = '検索';
-            a.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
+            link.textContent = '検索';
+            link.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
           }
-          setBackgroundStyle(a, COLOR_LIGHT_HISTORY);
-          itemDiv.appendChild(a);
+
+          if (part.code && part.code in this.db.cart) {
+            setBackgroundStyle(link, COLOR_LIGHT_IN_CART);
+            link.title = `カートに入っています\n${LINK_TITLE}`;
+          }
+          else {
+            setBackgroundStyle(link, COLOR_LIGHT_HISTORY);
+            link.title = LINK_TITLE;
+          }
+
+          itemDiv.appendChild(link);
           itemDiv.appendChild(document.createTextNode(partName));
         }
       }
@@ -373,11 +381,20 @@
 
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
-        const a = document.createElement('a');
-        a.href = `https://akizukidenshi.com/catalog/g/g${part.code}/`;
-        a.textContent = part.code;
-        a.title = LINK_TITLE;
-        partCodeDiv.appendChild(a);
+        const link = document.createElement('a');
+        link.href = `https://akizukidenshi.com/catalog/g/g${partCode}/`;
+        link.textContent = partCode;
+
+        if (partCode in this.db.cart) {
+          setBackgroundStyle(link, COLOR_LIGHT_IN_CART);
+          link.title = `カートに入っています\n${LINK_TITLE}`;
+        }
+        else {
+          setBackgroundStyle(link, COLOR_LIGHT_HISTORY);
+          link.title = LINK_TITLE;
+        }
+
+        partCodeDiv.appendChild(link);
       }
       await this.saveDatabase();
     }
@@ -469,7 +486,7 @@
           const item = this.db.cart[code];
           if (item.isInCart) {
             setBackgroundStyle(itemDiv, COLOR_LIGHT_IN_CART, false);
-            imageDiv.appendChild(this.createCartBanner(part));
+            imageDiv.appendChild(this.createCartIcon(part));
           }
         }
       }
@@ -496,7 +513,7 @@
           const item = this.db.cart[code];
           if (item.isInCart && item.quantity > 0) {
             setBackgroundStyle(itemDl, COLOR_LIGHT_IN_CART);
-            itemDt.appendChild(this.createCartBanner(part));
+            itemDt.appendChild(this.createCartIcon(part));
           }
         }
       }
@@ -568,18 +585,22 @@
       return link;
     }
 
-    // MARK: 商品画像の左下に付けるバナーを生成
-    createCartBanner(part) {
+    // MARK: カートに入っていることを示すアイコンを生成
+    createCartIcon(part) {
       const span = document.createElement('span');
       span.href = this.getSearchUrl(part.name);
       span.style.display = 'inline-block';
+      span.style.width = '20px';
+      span.style.height = '20px';
       span.style.backgroundColor = COLOR_DARK_IN_CART;
-      span.style.padding = '1px 5px';
       span.style.position = 'absolute';
-      span.style.right = '0';
-      span.style.top = '0';
-      span.style.borderRadius = '4px';
-      span.style.fontSize = '10px';
+      span.style.right = '-3px';
+      span.style.top = '-3px';
+      span.style.borderRadius = '999px';
+      span.style.fontSize = '15px';
+      span.style.lineHeight = '20px';
+      span.style.fontWeight = 'bold';
+      span.style.textAlign = 'center';
       span.style.color = '#fff';
 
       let qty = 0;
@@ -589,7 +610,7 @@
           qty = item.quantity;
         }
       }
-      span.textContent = `🛒${qty}`;
+      span.textContent = `${qty}`;
       span.title = LINK_TITLE;
 
       return span;
