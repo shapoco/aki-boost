@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.268
+// @version     1.0.269
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -310,15 +310,7 @@
         const itemDivs = Array.from(table.querySelectorAll('.block-purchase-history--goods-name'));
         for (let itemDiv of itemDivs) {
           // 部品情報の取得
-          const wideName = normalizePartName(itemDiv.textContent);
-          if (!wideName) {
-            debugError(`部品名の要素が見つかりませんでした`);
-            continue;
-          }
-          const partName = normalizePartName(wideName);
-          if (partName != wideName) {
-            debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
-          }
+          const partName = normalizePartName(itemDiv.textContent);
 
           const part = this.partByName(partName);
           part.linkOrder(id);
@@ -365,11 +357,7 @@
       for (let partRow of partRows) {
         const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partCode = partCodeDiv.textContent.trim();
-        const wideName = partRow.querySelector('.block-purchase-history-detail--goods-name').textContent;
-        const partName = normalizePartName(wideName);
-        if (partName != wideName) {
-          debugLog(`部品名正規化: '${wideName}' -> '${partName}'`);
-        }
+        const partName = normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
 
         if (!partCode || !partName) {
           debugError(`通販コードまたは部品名が見つかりません`);
@@ -423,12 +411,7 @@
     // MARK: 商品ページを修正
     async fixItemPage(doc) {
       const code = doc.querySelector('#hidden_goods').value;
-      const wideName = doc.querySelector('#hidden_goods_name').value;
-      const name = normalizePartName(wideName);
-      if (name != wideName) {
-        debugLog(`部品名正規化: '${wideName}' -> '${name}'`);
-      }
-
+      const name = normalizePartName(doc.querySelector('#hidden_goods_name').value);
       const part = this.partByCode(code, name);
 
       const h1 = doc.querySelector('.block-goods-name--text');
