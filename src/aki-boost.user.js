@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.333
+// @version     1.0.336
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -311,6 +311,7 @@
 
       let checkBoxes = [];
 
+      // 表の生成
       const table = createTable(
         ['操作', '通販コード', '商品名', '数量', '日時']
       );
@@ -318,27 +319,27 @@
       const cartItems = Object.values(this.db.cart);
       cartItems.sort((a, b) => b.timestamp - a.timestamp);
       for (let cartItem of cartItems) {
-        const tr = document.createElement('tr');
-
-        let part = new Part(cartItem.code, null);
+        let partName = '(不明)';
         if (cartItem.code in this.db.parts) {
-          part = this.db.parts[cartItem.code];
+          partName = this.db.parts[cartItem.code].name;
         }
 
+        // 操作用のチェックボックス
         const checkBox = document.createElement('input');
         checkBox.type = 'checkbox';
         checkBox.dataset.partCode = cartItem.code;
         checkBox.dataset.quantity = cartItem.quantity;
         checkBoxes.push(checkBox);
 
+        // 行の生成
+        const tr = document.createElement('tr');
         tr.appendChild(createTableCell(checkBox, { textAlign: 'center' }));
         tr.appendChild(createTableCell(this.createPartCodeLink(cartItem.code), { textAlign: 'center' }));
-        tr.appendChild(createTableCell(part.name ? part.name : '(不明)'));
+        tr.appendChild(createTableCell(partName));
         tr.appendChild(createTableCell(cartItem.quantity, { textAlign: 'right', noWrap: true }));
         const timeTd = createTableCell(prettyTime(cartItem.timestamp), { textAlign: 'right', noWrap: true });
         timeTd.title = new Date(cartItem.timestamp).toLocaleString();
         tr.appendChild(timeTd);
-
         tbody.appendChild(tr);
       }
 
@@ -366,6 +367,26 @@
       windowDiv.closeBox.addEventListener('click', () => {
         windowDiv.remove();
         this.menuOpenButton.disabled = false;
+      });
+
+      addToCartButton.addEventListener('click', async () => {
+        let items = [];
+        let totalQty = 0;
+        for (let checkBox of checkBoxes) {
+          if (checkBox.checked) {
+            const code = checkBox.dataset.partCode;
+            const qty = parseInt(checkBox.dataset.quantity);
+            items.push(`${encodeURIComponent(code)}+${qty}`);
+            totalQty += qty;
+          }
+        }
+        if (items.length > 0) {
+          const url = `https://akizukidenshi.com/catalog/quickorder/blanketorder.aspx?regist_goods=${items.join('%0D%0A')}`;
+          window.open(url, '_blank');
+        }
+        else {
+          alert('商品がチェックされていません。');
+        }
       });
     }
 
@@ -490,6 +511,7 @@
         return;
       }
 
+      // 購入履歴を列挙
       const div = document.createElement('div');
       div.appendChild(document.createTextNode('購入履歴: '));
       for (let orderId of part.orderIds) {
@@ -511,6 +533,7 @@
       }
       setBackgroundStyle(div, COLOR_LIGHT_HISTORY);
 
+      // カートに入っている商品の情報
       const qty = this.partQuantityInCart(code);
       if (qty > 0) {
         div.appendChild(document.createTextNode(' | '));
@@ -524,9 +547,9 @@
 
       h1.parentElement.appendChild(div);
 
+      // 関連商品にも強調表示を適用する
       const itemDivs = Array.from(doc.querySelectorAll('.js-enhanced-ecommerce-item'));
       for (const itemDiv of itemDivs) {
-        const codeDl = itemDiv.querySelector('.block-bulk-purchase-b--purchase_qty');
         const nameDiv = itemDiv.querySelector('.block-bulk-purchase-b--goods-name');
         const code = itemDiv.querySelector('input[name="goods"]').value;
         const name = normalizePartName(nameDiv.textContent);
