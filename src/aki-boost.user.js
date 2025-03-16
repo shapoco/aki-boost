@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.337
+// @version     1.0.364
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -24,6 +24,7 @@
   const NAME_KEY_PREFIX = 'akibst-partname-';
   const LINK_TITLE = `${APP_NAME} によるアノテーション`;
 
+  const QUANTITY_UNKNOWN = -1;
   const CART_ITEM_LIFE_TIME = 7 * 86400 * 1000;
 
   const PARAGRAPH_MARGIN = '10px';
@@ -38,6 +39,7 @@
       this.db = new Database();
       this.menuOpenButton = document.createElement('button');
       this.menuWindow = createWindow(`${APP_NAME} (v${GM_info.script.version})`, '250px');
+      this.debugMenuDiv = document.createElement('div');
       this.databaseInfoLabel = document.createElement('span');
       this.isLoggedIn = false;
     }
@@ -96,7 +98,7 @@
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const learnButton = createButton('購入履歴を読み込む', '100%');
+      const learnButton = createButton('📃➜📦 購入履歴を読み込む', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(learnButton));
       if (!this.isLoggedIn) {
         learnButton.disabled = true;
@@ -104,18 +106,31 @@
           '購入履歴を読み込む前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
       }
 
-      const resetButton = createButton('データベースをリセット', '100%');
-      this.menuWindow.appendChild(wrapWithParagraph(resetButton));
-
-      const cartHistoryButton = createButton('最近カートに入れた商品', '100%');
+      const cartHistoryButton = createButton('📦➜🛒 最近カートに入れた商品', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(cartHistoryButton));
 
-      this.menuOpenButton.addEventListener('click', () => {
+      const resetButton = createButton('📦➜🗑️ データベースをリセット', '100%');
+      this.menuWindow.appendChild(wrapWithParagraph(resetButton));
+
+      this.debugMenuDiv.appendChild(document.createElement('hr'));
+      this.debugMenuDiv.appendChild(wrapWithParagraph('デバッグ用機能:'));
+
+      const exportButton = createButton('📦➜📋 データベースをバックアップ', '100%');
+      this.debugMenuDiv.appendChild(wrapWithParagraph(exportButton));
+
+      const debugStatus = wrapWithParagraph('');
+      this.debugMenuDiv.appendChild(debugStatus);
+
+      this.debugMenuDiv.style.display = 'none';
+      this.menuWindow.appendChild(this.debugMenuDiv);
+
+      this.menuOpenButton.addEventListener('click', (e) => {
         if (this.menuWindow.parentNode) {
           this.menuWindow.remove();
         }
         else {
           this.updateDatabaseInfo();
+          this.debugMenuDiv.style.display = e.shiftKey ? 'block' : 'none';
           document.body.appendChild(this.menuWindow);
         }
       });
@@ -130,21 +145,21 @@
 
       learnButton.addEventListener('click', async () => {
         this.menuWindow.remove();
-        try {
-          await this.openLoadHistoryTool();
-        }
-        catch (e) {
-          debugError(e);
-        }
+        await this.openLoadHistoryTool();
       });
 
-      cartHistoryButton.addEventListener('click', () => {
+      cartHistoryButton.addEventListener('click', async () => {
         this.menuWindow.remove();
+        await this.openCartHistoryTool();
+      });
+
+      exportButton.addEventListener('click', async () => {
         try {
-          this.openCartHistoryTool();
+          await navigator.clipboard.writeText(JSON.stringify(this.db));
+          debugStatus.textContent = 'クリップボードにコピーしました。';
         }
         catch (e) {
-          debugError(e);
+          debugStatus.textContent = 'クリップボードへのコピーに失敗しました。';
         }
       });
     }
@@ -160,7 +175,7 @@
     async openLoadHistoryTool() {
       this.menuOpenButton.disabled = true;
 
-      this.loadDatabase();
+      await this.loadDatabase();
 
       const windowDiv = createWindow('購入履歴の読み込み', '300px');
       windowDiv.style.position = 'fixed';
@@ -256,7 +271,7 @@
         let numLoaded = 0;
         for (let i = 0; i < orderIds.length; i++) {
           const orderId = orderIds[i];
-          if (!(orderId in this.db.orders)) {
+          if (!(orderId in this.db.orders) || !this.db.orders[orderId].isFilled()) {
             status.textContent = `購入履歴を読み込んでいます... (${i + 1}/${orderIds.length})`;
             progressBar.value = i * 100 / orderIds.length;
 
@@ -275,7 +290,7 @@
         }
 
         this.updateDatabaseInfo();
-        this.saveDatabase();
+        await this.saveDatabase();
 
         if (numLoaded == 0) {
           status.textContent = '新しい購入履歴はありませんでした。';
@@ -294,10 +309,10 @@
     }
 
     // MARK: カート履歴の表示
-    openCartHistoryTool() {
+    async openCartHistoryTool() {
       this.menuOpenButton.disabled = true;
 
-      this.loadDatabase();
+      await this.loadDatabase();
 
       const windowDiv = createWindow('最近カートに入れた商品', '720px');
       windowDiv.style.position = 'fixed';
@@ -370,6 +385,7 @@
       });
 
       addToCartButton.addEventListener('click', async () => {
+        // チェックされた商品をカートに追加
         let items = [];
         let totalQty = 0;
         for (let checkBox of checkBoxes) {
@@ -434,6 +450,7 @@
         const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partCode = partCodeDiv.textContent.trim();
         const partName = normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
+        const qty = parseInt(partRow.querySelector('.block-purchase-history-detail--goods-qty').textContent.trim());
 
         if (!partCode || !partName) {
           debugError(`通販コードまたは部品名が見つかりません`);
@@ -442,6 +459,8 @@
         let part = this.partByCode(partCode, partName);
         order.linkPart(partCode);
         part.linkOrder(orderId);
+
+        order.items[partCode].quantity = qty;
 
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
@@ -517,9 +536,13 @@
       for (let orderId of part.orderIds) {
         if (!(orderId in this.db.orders)) continue;
         const order = this.db.orders[orderId];
+        let linkText = new Date(order.timestamp).toLocaleDateString();
+        if (code in order.items && order.items[code].quantity > 0) {
+          linkText += ` (${order.items[code].quantity}個)`;
+        }
         const link = document.createElement('a');
         link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
-        link.textContent = new Date(order.time).toLocaleDateString();
+        link.textContent = linkText;
         link.title = LINK_TITLE;
         div.appendChild(link);
         div.appendChild(document.createTextNode(' | '));
@@ -605,11 +628,11 @@
         debugLog(`新規注文情報: ${id}`);
         this.db.orders[id] = order;
       }
-      if (!order.time || order.time < time) {
-        const oldTimeStr = order.time ? new Date(order.time).toLocaleString() : 'null';
+      if (!order.timestamp || order.timestamp < time) {
+        const oldTimeStr = order.timestamp ? new Date(order.timestamp).toLocaleString() : 'null';
         const newTimeStr = new Date(time).toLocaleString();
         debugLog(`注文日時更新: ${oldTimeStr} --> ${newTimeStr}`);
-        order.time = time;
+        order.timestamp = time;
       }
       return order;
     }
@@ -634,7 +657,7 @@
       let timeList = [];
       for (let orderId of part.orderIds) {
         if (orderId in this.db.orders) {
-          timeList.push(this.db.orders[orderId].time);
+          timeList.push(this.db.orders[orderId].timestamp);
         }
       }
       timeList.sort((a, b) => b - a);
@@ -764,6 +787,8 @@
       return item;
     }
 
+    // MARK: カートに入っている部品の数を返す
+    // 当該部品がカートに入っていない場合は 0 を返す
     partQuantityInCart(code) {
       if (!code || !(code in this.db.cart)) return 0;
       const cartItem = this.db.cart[code];
@@ -773,37 +798,16 @@
     // MARK: データベースの読み込み
     async loadDatabase() {
       try {
-        const json = JSON.parse(await GM.getValue(SETTING_KEY));
-        const now = new Date().getTime();
-        if (json) {
-          if (json.orders) {
-            for (const id in json.orders) {
-              this.db.orders[id] = Object.assign(new Order(null), json.orders[id]);
-            }
+        this.db.loadFromJson(JSON.parse(await GM.getValue(SETTING_KEY)));
+        const countSpan = document.querySelector('.block-headernav--cart-count');
+        if (!countSpan || parseInt(countSpan.textContent) <= 0) {
+          // カートの商品数がゼロになっている場合は全商品をカートから外す
+          // 注文確定やセッション切れによってカートが空になった場合を想定
+          for (const item of Object.values(this.db.cart)) {
+            item.isInCart = false;
           }
-          if (json.parts) {
-            for (const code in json.parts) {
-              this.db.parts[code] = Object.assign(new Part(null, null), json.parts[code]);
-            }
-          }
-          if (json.cart) {
-            for (const code in json.cart) {
-              const item = Object.assign(new CartItem(code, 0, now), json.cart[code]);
-              if (item.timestamp && item.timestamp > now - CART_ITEM_LIFE_TIME) {
-                this.db.cart[code] = item;
-              }
-            }
-
-            const countSpan = document.querySelector('.block-headernav--cart-count');
-            if (!countSpan || parseInt(countSpan.textContent) <= 0) {
-              // カートの商品数がゼロになっている場合は全商品をカートから外す
-              for (const item of Object.values(this.db.cart)) {
-                item.isInCart = false;
-              }
-            }
-          }
-
         }
+        this.db.version = GM_info.script.version;
         this.reportDatabase();
       }
       catch (e) {
@@ -815,7 +819,7 @@
     async saveDatabase() {
       try {
         this.reportDatabase();
-        await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
+        //await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
       }
       catch (e) {
         debugError(`データベースの保存に失敗しました: ${e}`);
@@ -837,24 +841,99 @@
   // MARK: データベース
   class Database {
     constructor() {
-      this.orders = {};
+      this.version = GM_info.script.version;
       this.parts = {};
+      this.orders = {};
       this.cart = {};
+    }
+
+    loadFromJson(json) {
+      const now = new Date().getTime();
+      for (let key in this) {
+        if (key == 'parts') {
+          // 部品情報
+          for (let code in json.parts) {
+            let part = new Part(code, null);
+            this.parts[code] = part.loadFromJson(json.parts[code]);
+          }
+        }
+        else if (key == 'orders') {
+          // 注文履歴
+          for (let id in json.orders) {
+            let order = new Order(id, now);
+            this.orders[id] = order.loadFromJson(json.orders[id]);
+          }
+        }
+        else if (key == 'cart') {
+          // カート履歴
+          for (let code in json.cart) {
+            let part = new CartItem(code, QUANTITY_UNKNOWN, now);
+            this.cart[code] = part.loadFromJson(json.cart[code]);
+          }
+        }
+        else if (key in json) {
+          this[key] = json[key];
+        }
+      }
+      return this;
     }
   }
 
   // MARK: 注文情報
   class Order {
-    constructor(id, time) {
+    constructor(id, ts) {
       this.id = id;
-      this.time = time;
-      this.itemCodes = [];
+      this.timestamp = ts;
+      this.items = {};
     }
 
-    linkPart(itemCode) {
-      if (this.itemCodes.includes(itemCode)) return;
-      debugLog(`注文情報に部品を追加: ${this.id} --> ${itemCode}`);
-      this.itemCodes.push(itemCode);
+    isFilled() {
+      if (this.timestamp == -1) return false;
+      for (const code in this.items) {
+        const item = this.items[code];
+        if (code != item.code) return false;
+        if (item.quantity <= 0) return false;
+      }
+      return true;
+    }
+
+    linkPart(partCode) {
+      if (partCode in this.items) return;
+      debugLog(`注文情報に部品を追加: ${this.id} --> ${partCode}`);
+      this.items[partCode] = new CartItem(partCode, QUANTITY_UNKNOWN, -1);
+    }
+
+    loadFromJson(json) {
+      // TODO: 削除 (旧バージョンのDB対応)
+      if (json.time) {
+        json.timestamp = json.time;
+        delete json.time;
+        debugLog(`DBマイグレーション: Order.time --> Order.timestamp`);
+      }
+
+      // TODO: 削除 (旧バージョンのDB対応)
+      if (json.itemCodes) {
+        json.items = {};
+        for (const code of json.itemCodes) {
+          json.items[code] = new CartItem(code, QUANTITY_UNKNOWN, json.timestamp);
+        }
+        delete json.itemCodes;
+        debugLog(`DBマイグレーション: Order.itemCodes --> Order.items`);
+      }
+
+      for (let key in this) {
+        if (key == 'items') {
+          for (let code in json.items) {
+            let item = new CartItem(code, QUANTITY_UNKNOWN, json.timestamp);
+            this.items[code] = item.loadFromJson(json.items[code]);
+          }
+        }
+        else if (key in json) {
+          this[key] = json[key];
+        }
+      }
+
+      return this;
     }
   }
 
@@ -878,6 +957,15 @@
       }
       other.orderIds = [];
     }
+
+    loadFromJson(json) {
+      for (let key in this) {
+        if (key in json) {
+          this[key] = json[key];
+        }
+      }
+      return this;
+    }
   }
 
   // MARK: 買い物かごのアイテム
@@ -887,6 +975,15 @@
       this.quantity = qty;
       this.timestamp = ts;
       this.isInCart = qty > 0;
+    }
+
+    loadFromJson(json) {
+      for (let key in this) {
+        if (key in json) {
+          this[key] = json[key];
+        }
+      }
+      return this;
     }
   }
 
@@ -933,9 +1030,9 @@
     return windowDiv;
   }
 
-  function createButton(text, width = null) {
+  function createButton(innerHTML, width = null) {
     const button = document.createElement('button');
-    button.textContent = text;
+    button.innerHTML = innerHTML;
     button.style.boxSizing = 'border-box';
     if (width) button.style.width = width;
     button.style.cursor = 'pointer';
