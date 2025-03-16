@@ -5,12 +5,13 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.269
+// @version     1.0.272
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
 // @grant       GM.getValue
 // @grant       GM.setValue
+// @grant       GM_info
 // ==/UserScript==
 
 (function () {
@@ -34,7 +35,7 @@
     constructor() {
       this.db = new Database();
       this.menuOpenButton = document.createElement('button');
-      this.menuWindow = createWindow(APP_NAME, '250px');
+      this.menuWindow = createWindow(`${APP_NAME} (v${GM_info.script.version})`, '250px');
       this.databaseInfoLabel = document.createElement('span');
       this.isLoggedIn = false;
     }
@@ -44,7 +45,7 @@
 
       await this.loadDatabase();
 
-      this.setupMenu();
+      this.setupMenuWindow();
 
       if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
         await this.scanHistory(document);
@@ -70,7 +71,7 @@
     }
 
     // MARK: メニュー
-    setupMenu() {
+    setupMenuWindow() {
       this.menuOpenButton.textContent = `⚙ ${APP_NAME}`;
       this.menuOpenButton.style.writingMode = 'vertical-rl';
       this.menuOpenButton.style.position = 'fixed';
@@ -816,6 +817,7 @@
     caption.style.backgroundColor = COLOR_DARK_HISTORY;
     caption.style.color = '#fff';
     caption.style.padding = '5px';
+    caption.style.fontWeight = 'bold';
     div.appendChild(caption);
 
     return div;
