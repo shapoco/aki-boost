@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.364
+// @version     1.0.371
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -66,6 +66,8 @@
       else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
         await this.fixCatalog(document);
       }
+
+      await this.saveDatabase();
     }
 
     checkLoginState() {
@@ -155,6 +157,7 @@
 
       exportButton.addEventListener('click', async () => {
         try {
+          this.cleanupDatabase();
           await navigator.clipboard.writeText(JSON.stringify(this.db));
           debugStatus.textContent = 'クリップボードにコピーしました。';
         }
@@ -276,7 +279,7 @@
             progressBar.value = i * 100 / orderIds.length;
 
             const doc = await downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
-            this.scanHistoryDetail(doc);
+            await this.scanHistoryDetail(doc);
 
             numLoaded++;
           }
@@ -435,7 +438,6 @@
           itemDiv.appendChild(document.createTextNode(partName));
         }
       }
-      await this.saveDatabase();
     }
 
     // MARK: 購入履歴詳細をスキャン
@@ -451,11 +453,10 @@
         const partCode = partCodeDiv.textContent.trim();
         const partName = normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
         const qty = parseInt(partRow.querySelector('.block-purchase-history-detail--goods-qty').textContent.trim());
+        if (!partCode) { debugError(`通販コードが見つかりません`); continue; }
+        if (!partName) { debugError(`部品名が見つかりません`); continue; }
+        if (qty <= 0) { debugError(`数量が見つかりません`); continue; }
 
-        if (!partCode || !partName) {
-          debugError(`通販コードまたは部品名が見つかりません`);
-          continue;
-        }
         let part = this.partByCode(partCode, partName);
         order.linkPart(partCode);
         part.linkOrder(orderId);
@@ -466,7 +467,6 @@
         partCodeDiv.innerHTML = '';
         partCodeDiv.appendChild(this.createPartCodeLink(partCode));
       }
-      await this.saveDatabase();
     }
 
     // 部品ページへのリンクを作成
@@ -515,7 +515,6 @@
         item.isInCart = true;
         index++;
       }
-      await this.saveDatabase();
     }
 
     // MARK: 商品ページを修正
@@ -588,8 +587,6 @@
           imageDiv.appendChild(this.createCartIcon(code, qty));
         }
       }
-
-      await this.saveDatabase();
     }
 
     // MARK: カタログページを修正
@@ -613,7 +610,6 @@
           itemDt.appendChild(this.createCartIcon(code, qty));
         }
       }
-      await this.saveDatabase();
     }
 
     // MARK: 注文情報をIDから取得
@@ -815,11 +811,42 @@
       }
     }
 
+    // MARK: データベースのクリーンアップ
+    async cleanupDatabase() {
+      let unusedCodes = {};
+      for (const code in this.db.parts) {
+        unusedCodes[code] = true;
+      }
+      for (let order of Object.values(this.db.orders)) {
+        for (const code in order.items) {
+          if (code in unusedCodes) {
+            delete unusedCodes[code];
+          }
+        }
+      }
+      for (let cartItem of Object.values(this.db.cart)) {
+        if (cartItem.code in unusedCodes) {
+          delete unusedCodes[cartItem.code];
+        }
+      }
+      let numDeleted = 0;
+      for (const code in unusedCodes) {
+        if (code in this.db.parts) {
+          delete this.db.parts[code];
+          numDeleted++;
+        }
+      }
+      if (numDeleted > 0) {
+        debugLog(`未使用の通販コードの削除: ${numDeleted}個`);
+      }
+    }
+
     // MARK: データベースの保存
     async saveDatabase() {
       try {
+        this.cleanupDatabase();
         this.reportDatabase();
-        //await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
+        await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
       }
       catch (e) {
         debugError(`データベースの保存に失敗しました: ${e}`);
@@ -872,6 +899,37 @@
           }
         }
         else if (key in json) {
+          this[key] = json[key];
+        }
+      }
+      return this;
+    }
+  }
+
+  // MARK: 部品情報
+  class Part {
+    constructor(code, name) {
+      this.code = code;
+      this.name = name;
+      this.orderIds = [];
+    }
+
+    linkOrder(orderId) {
+      if (this.orderIds.includes(orderId)) return;
+      debugLog(`部品情報に注文情報をリンク: ${this.code} --> ${orderId}`);
+      this.orderIds.push(orderId);
+    }
+
+    migrateFrom(other) {
+      for (let orderId of other.orderIds) {
+        this.linkOrder(orderId);
+      }
+      other.orderIds = [];
+    }
+
+    loadFromJson(json) {
+      for (let key in this) {
+        if (key in json) {
           this[key] = json[key];
         }
       }
@@ -937,37 +995,6 @@
     }
   }
 
-  // MARK: 部品情報
-  class Part {
-    constructor(code, name) {
-      this.code = code;
-      this.name = name;
-      this.orderIds = [];
-    }
-
-    linkOrder(orderId) {
-      if (this.orderIds.includes(orderId)) return;
-      debugLog(`部品情報に注文情報をリンク: ${this.code} --> ${orderId}`);
-      this.orderIds.push(orderId);
-    }
-
-    migrateFrom(other) {
-      for (let orderId of other.orderIds) {
-        this.linkOrder(orderId);
-      }
-      other.orderIds = [];
-    }
-
-    loadFromJson(json) {
-      for (let key in this) {
-        if (key in json) {
-          this[key] = json[key];
-        }
-      }
-      return this;
-    }
-  }
-
   // MARK: 買い物かごのアイテム
   class CartItem {
     constructor(code, qty, ts) {
@@ -980,6 +1007,7 @@
     loadFromJson(json) {
       for (let key in this) {
         if (key in json) {
+          if (!json.quantity || json.quantity <= 0) continue;
           this[key] = json[key];
         }
       }
