@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.371
+// @version     1.0.380
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -22,7 +22,7 @@
   const APP_NAME = 'Aki Boost';
   const SETTING_KEY = 'akibst_settings';
   const NAME_KEY_PREFIX = 'akibst-partname-';
-  const LINK_TITLE = `${APP_NAME} によるアノテーション`;
+  const LINK_TITLE = `${APP_NAME} が作成したリンク`;
 
   const QUANTITY_UNKNOWN = -1;
   const CART_ITEM_LIFE_TIME = 7 * 86400 * 1000;
@@ -535,15 +535,14 @@
       for (let orderId of part.orderIds) {
         if (!(orderId in this.db.orders)) continue;
         const order = this.db.orders[orderId];
-        let linkText = new Date(order.timestamp).toLocaleDateString();
-        if (code in order.items && order.items[code].quantity > 0) {
-          linkText += ` (${order.items[code].quantity}個)`;
-        }
         const link = document.createElement('a');
         link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
-        link.textContent = linkText;
+        link.textContent = new Date(order.timestamp).toLocaleDateString();
         link.title = LINK_TITLE;
         div.appendChild(link);
+        if (code in order.items && order.items[code].quantity > 0) {
+          div.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+        }
         div.appendChild(document.createTextNode(' | '));
       }
       {
@@ -650,28 +649,34 @@
       link.style.color = '#fff';
 
       // 購入日
-      let timeList = [];
+      let orders = [];
       for (let orderId of part.orderIds) {
         if (orderId in this.db.orders) {
-          timeList.push(this.db.orders[orderId].timestamp);
+          orders.push(this.db.orders[orderId]);
         }
       }
-      timeList.sort((a, b) => b - a);
+      orders.sort((a, b) => b.timestamp - a.timestamp);
 
-      if (timeList.length == 0) {
+      if (orders.length == 0) {
         // 購入日不明
-        link.textContent = `${part.orderIds.length} 回購入`;
+        link.textContent = `${purchaseCount} 回購入`;
       }
-      else if (timeList.length == 1 && purchaseCount == 1) {
+      else if (orders.length == 1 && purchaseCount == 1) {
         // 日付が分かっている 1 回だけ購入
-        link.textContent = `${prettyTime(timeList[0])}に購入`;
+        link.textContent = `${prettyTime(orders[0].timestamp)}に購入`;
       }
       else {
         // 複数回購入
-        link.textContent = `${prettyTime(timeList[0])} + ${purchaseCount - 1} 回購入`;
+        link.textContent = `${prettyTime(orders[0].timestamp)} + ${purchaseCount - 1} 回購入`;
       }
 
-      const timeStrs = timeList.map(t => `・${new Date(t).toLocaleDateString()}`);
+      const timeStrs = orders.map(order => {
+        let line = `・${new Date(order.timestamp).toLocaleDateString()}`;
+        if (order.items[part.code].quantity > 0) {
+          line += ` (${order.items[part.code].quantity}個)`;
+        }
+        return line;
+      });
       link.title = `${timeStrs.join('\n')}\n${LINK_TITLE}`;
 
       return link;
@@ -814,21 +819,30 @@
     // MARK: データベースのクリーンアップ
     async cleanupDatabase() {
       let unusedCodes = {};
-      for (const code in this.db.parts) {
-        unusedCodes[code] = true;
+      let unusedNameKeys = {};
+      for (const key in this.db.parts) {
+        const part = this.db.parts[key];
+        if (key.startsWith(NAME_KEY_PREFIX) && part.code) {
+          unusedNameKeys[part.code] = key;
+        }
+        else {
+          unusedCodes[key] = true;
+        }
       }
+
       for (let order of Object.values(this.db.orders)) {
         for (const code in order.items) {
-          if (code in unusedCodes) {
-            delete unusedCodes[code];
-          }
+          if (code in unusedCodes) delete unusedCodes[code];
+          if (code in unusedNameKeys) delete unusedNameKeys[code];
         }
       }
+
       for (let cartItem of Object.values(this.db.cart)) {
-        if (cartItem.code in unusedCodes) {
-          delete unusedCodes[cartItem.code];
-        }
+        const code = cartItem.code;
+        if (code in unusedCodes) delete unusedCodes[code];
+        if (code in unusedNameKeys) delete unusedNameKeys[code];
       }
+
       let numDeleted = 0;
       for (const code in unusedCodes) {
         if (code in this.db.parts) {
@@ -836,9 +850,14 @@
           numDeleted++;
         }
       }
-      if (numDeleted > 0) {
-        debugLog(`未使用の通販コードの削除: ${numDeleted}個`);
+      for (const code in unusedNameKeys) {
+        if (code in this.db.parts) {
+          delete this.db.parts[unusedNameKeys[code]];
+          numDeleted++;
+        }
       }
+
+      if (numDeleted > 0) debugLog(`未使用の通販コードの削除: ${numDeleted}個`);
     }
 
     // MARK: データベースの保存
