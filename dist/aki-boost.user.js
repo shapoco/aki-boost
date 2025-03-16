@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.380
+// @version     1.0.388
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -100,12 +100,12 @@
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const learnButton = createButton('📃➜📦 購入履歴を読み込む', '100%');
+      const learnButton = createButton('📃➜📦 購入履歴を更新', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(learnButton));
       if (!this.isLoggedIn) {
         learnButton.disabled = true;
         this.menuWindow.appendChild(wrapWithParagraph(
-          '購入履歴を読み込む前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
+          '購入履歴を更新する前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
       }
 
       const cartHistoryButton = createButton('📦➜🛒 最近カートに入れた商品', '100%');
@@ -147,7 +147,7 @@
 
       learnButton.addEventListener('click', async () => {
         this.menuWindow.remove();
-        await this.openLoadHistoryTool();
+        await this.openUpdateHistoryWindow();
       });
 
       cartHistoryButton.addEventListener('click', async () => {
@@ -174,19 +174,19 @@
         `カートのログ: ${Object.keys(this.db.cart).length}件`;
     }
 
-    // MARK: 購入履歴の読み込み
-    async openLoadHistoryTool() {
+    // MARK: 購入履歴の更新
+    async openUpdateHistoryWindow() {
       this.menuOpenButton.disabled = true;
 
       await this.loadDatabase();
 
-      const windowDiv = createWindow('購入履歴の読み込み', '300px');
+      const windowDiv = createWindow('購入履歴の更新', '300px');
       windowDiv.style.position = 'fixed';
       windowDiv.style.left = '50%';
       windowDiv.style.top = '50%';
       windowDiv.style.transform = 'translate(-50%, -50%)';
 
-      const status = wrapWithParagraph('[開始] ボタンで読み込みを開始します。');
+      const status = wrapWithParagraph('[開始] ボタンで更新を開始します。');
       windowDiv.appendChild(status);
 
       const progressBar = document.createElement('progress');
@@ -216,14 +216,14 @@
         closeButton.disabled = true;
         windowDiv.closeBox.disabled = true;
         progressBar.style.opacity = '1';
-        await this.loadHistory(status, progressBar);
+        await this.updateHistory(status, progressBar);
         closeButton.disabled = false;
         windowDiv.closeBox.disabled = false;
       });
     }
 
-    // MARK: 購入履歴の読み込み
-    async loadHistory(status, progressBar) {
+    // MARK: 購入履歴の更新
+    async updateHistory(status, progressBar) {
       const unknownOrderIds = Object.keys(this.db.orders);
 
       try {
@@ -275,7 +275,7 @@
         for (let i = 0; i < orderIds.length; i++) {
           const orderId = orderIds[i];
           if (!(orderId in this.db.orders) || !this.db.orders[orderId].isFilled()) {
-            status.textContent = `購入履歴を読み込んでいます... (${i + 1}/${orderIds.length})`;
+            status.textContent = `購入履歴を更新しています... (${i + 1}/${orderIds.length})`;
             progressBar.value = i * 100 / orderIds.length;
 
             const doc = await downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
@@ -529,43 +529,56 @@
         return;
       }
 
+      let elems = [];
+
       // 購入履歴を列挙
-      const div = document.createElement('div');
-      div.appendChild(document.createTextNode('購入履歴: '));
       for (let orderId of part.orderIds) {
         if (!(orderId in this.db.orders)) continue;
         const order = this.db.orders[orderId];
+        const span = document.createElement('span');
         const link = document.createElement('a');
         link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
         link.textContent = new Date(order.timestamp).toLocaleDateString();
         link.title = LINK_TITLE;
-        div.appendChild(link);
+        span.appendChild(link);
         if (code in order.items && order.items[code].quantity > 0) {
-          div.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+          span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
         }
-        div.appendChild(document.createTextNode(' | '));
+        elems.push(span);
       }
-      {
+
+      if (false) {
         const link = document.createElement('a');
         link.href = this.getSearchUrl(part.name);
         link.textContent = "購入履歴から検索";
         link.title = LINK_TITLE;
-        div.appendChild(link);
+        elems.push(link);
       }
-      setBackgroundStyle(div, COLOR_LIGHT_HISTORY);
 
       // カートに入っている商品の情報
-      const qty = this.partQuantityInCart(code);
-      if (qty > 0) {
-        div.appendChild(document.createTextNode(' | '));
+      const qtyInCart = this.partQuantityInCart(code);
+      if (qtyInCart > 0) {
         const link = document.createElement('a');
         link.href = this.getCartUrl(code);
-        link.textContent = `カートに入っています (${qty} 個)`;
+        link.textContent = `カートに入っています (${qtyInCart}個)`;
         link.style.color = COLOR_DARK_IN_CART;
-        div.appendChild(link);
-        setBackgroundStyle(div, COLOR_LIGHT_IN_CART);
+        elems.push(link);
       }
 
+      const div = document.createElement('div');
+      if (part.orderIds.length > 0) {
+        div.appendChild(document.createTextNode('購入履歴: '));
+      }
+      for (let i = 0; i < elems.length; i++) {
+        if (i > 0) div.appendChild(document.createTextNode(' | '));
+        div.appendChild(elems[i]);
+      }
+      if (qtyInCart == 0) {
+        setBackgroundStyle(div, COLOR_LIGHT_HISTORY);
+      }
+      else {
+        setBackgroundStyle(div, COLOR_LIGHT_IN_CART);
+      }
       h1.parentElement.appendChild(div);
 
       // 関連商品にも強調表示を適用する
