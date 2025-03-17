@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.390
+// @version     1.0.451
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -21,7 +21,7 @@
 
   const APP_NAME = 'Aki Boost';
   const SETTING_KEY = 'akibst_settings';
-  const NAME_KEY_PREFIX = 'akibst-partname-';
+  const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除
   const LINK_TITLE = `${APP_NAME} が作成したリンク`;
 
   const QUANTITY_UNKNOWN = -1;
@@ -36,6 +36,7 @@
 
   class AkiBoost {
     constructor() {
+      /** @type {Database} */
       this.db = new Database();
       this.menuOpenButton = document.createElement('button');
       this.menuWindow = createWindow(`${APP_NAME} (v${GM_info.script.version})`, '250px');
@@ -117,8 +118,11 @@
       this.debugMenuDiv.appendChild(document.createElement('hr'));
       this.debugMenuDiv.appendChild(wrapWithParagraph('デバッグ用機能:'));
 
-      const exportButton = createButton('📦➜📋 データベースをバックアップ', '100%');
+      const exportButton = createButton('📦➜📋 JSON にエクスポート', '100%');
       this.debugMenuDiv.appendChild(wrapWithParagraph(exportButton));
+
+      const importButton = createButton('📋➜📦 JSON からインポート', '100%');
+      this.debugMenuDiv.appendChild(wrapWithParagraph(importButton));
 
       const debugStatus = wrapWithParagraph('');
       this.debugMenuDiv.appendChild(debugStatus);
@@ -162,7 +166,24 @@
           debugStatus.textContent = 'クリップボードにコピーしました。';
         }
         catch (e) {
+          debugError(e);
           debugStatus.textContent = 'クリップボードへのコピーに失敗しました。';
+        }
+      });
+
+      importButton.addEventListener('click', async () => {
+        try {
+          if (!confirm('データベースを復元しますか？\n【注意！】現在のデータベースの内容は失われます。')) return
+          const json = await navigator.clipboard.readText();
+          this.db = new Database();
+          this.db.loadFromJson(JSON.parse(json));
+          await this.saveDatabase();
+          this.updateDatabaseInfo();
+          debugStatus.textContent = 'クリップボードからインポートしました。';
+        }
+        catch (e) {
+          debugError(e);
+          debugStatus.textContent = 'インポートに失敗しました。';
         }
       });
     }
@@ -304,7 +325,6 @@
         progressBar.value = 100;
       }
       catch (e) {
-        this.db = bkp;
         const msg = `⚠ 読み込みに失敗しました`;
         debugError(`${msg}: ${e}`);
         status.textContent = msg;
@@ -337,12 +357,16 @@
       const cartItems = Object.values(this.db.cart);
       cartItems.sort((a, b) => b.timestamp - a.timestamp);
       for (let cartItem of cartItems) {
-        let partName = '(不明)';
+        let partName = cartItem.name;
         if (cartItem.code in this.db.parts) {
-          partName = this.db.parts[cartItem.code].name;
+          const newName = this.db.parts[cartItem.code].getName();;
+          if (newName) {
+            cartItem.name = newName;
+            partName = newName;
+          }
         }
 
-        // 操作用のチェックボックス
+        // 選択用チェックボックス
         const checkBox = document.createElement('input');
         checkBox.type = 'checkbox';
         checkBox.dataset.partCode = cartItem.code;
@@ -394,9 +418,9 @@
         for (let checkBox of checkBoxes) {
           if (checkBox.checked) {
             const code = checkBox.dataset.partCode;
-            const qty = parseInt(checkBox.dataset.quantity);
-            items.push(`${encodeURIComponent(code)}+${qty}`);
-            totalQty += qty;
+            const quantity = parseInt(checkBox.dataset.quantity);
+            items.push(`${encodeURIComponent(code)}+${quantity}`);
+            totalQty += quantity;
           }
         }
         if (items.length > 0) {
@@ -415,25 +439,37 @@
       for (let table of tables) {
         const idUls = table.querySelector('.block-purchase-history--order-detail-list');
 
-        const id = idUls.querySelector('a').textContent.trim();
+        const orderId = idUls.querySelector('a').textContent.trim();
         const time = parseDate(table.querySelector('.block-purchase-history--order_dt').textContent);
-        let order = this.orderById(id, time);
+        let order = this.orderById(orderId, time);
 
         const itemDivs = Array.from(table.querySelectorAll('.block-purchase-history--goods-name'));
         for (let itemDiv of itemDivs) {
           // 部品情報の取得
           const partName = normalizePartName(itemDiv.textContent);
 
-          const part = this.partByName(partName);
-          part.linkOrder(id);
-          order.linkPart(part.code);
+          // 通販コードを取得
+          let code = order.partCodeFromName(partName);
+          if (partName in this.db.partCodeDict) {
+            code = this.db.partCodeDict[partName];
+          }
 
           itemDiv.innerHTML = '';
-          if (part.code && !part.code.startsWith(NAME_KEY_PREFIX)) {
-            itemDiv.appendChild(this.createPartCodeLink(part.code, false));
+          if (code) {
+            const part = this.partByCode(code, partName);
+            part.linkToOrder(orderId);
+            order.linkToPart(code, partName);
+            itemDiv.appendChild(this.createPartCodeLink(code));
           }
           else {
-            itemDiv.appendChild(this.createPartCodeLink(partName, true));
+            // 通販コード不明
+            const link = document.createElement('a');
+            link.textContent = '(コード不明)';
+            link.title = `データベースを更新してください。\n${LINK_TITLE}`;
+            const keyword = partName.replace(/\s*\([^\)]+入り?\)\s*$/g, '');
+            link.href = this.getPartSearchUrl(keyword);
+            setBackgroundStyle(link, COLOR_LIGHT_HISTORY);
+            itemDiv.appendChild(link);
           }
           itemDiv.appendChild(document.createTextNode(partName));
         }
@@ -448,20 +484,20 @@
       const partRows = Array.from(partTableTbody.querySelectorAll('tr'));
 
       let order = this.orderById(orderId, time);
+
       for (let partRow of partRows) {
         const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partCode = partCodeDiv.textContent.trim();
         const partName = normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
-        const qty = parseInt(partRow.querySelector('.block-purchase-history-detail--goods-qty').textContent.trim());
+        const quantity = parseInt(partRow.querySelector('.block-purchase-history-detail--goods-qty').textContent.trim());
         if (!partCode) { debugError(`通販コードが見つかりません`); continue; }
         if (!partName) { debugError(`部品名が見つかりません`); continue; }
-        if (qty <= 0) { debugError(`数量が見つかりません`); continue; }
+        if (quantity <= 0) { debugError(`数量が見つかりません`); continue; }
 
+        // データベース更新
         let part = this.partByCode(partCode, partName);
-        order.linkPart(partCode);
-        part.linkOrder(orderId);
-
-        order.items[partCode].quantity = qty;
+        part.linkToOrder(orderId);
+        order.linkToPart(partCode, partName, quantity);
 
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
@@ -470,24 +506,15 @@
     }
 
     // 部品ページへのリンクを作成
-    createPartCodeLink(codeOrName, byName = false) {
-      const code = byName ? nameKeyOf(codeOrName) : codeOrName;
-
+    createPartCodeLink(code) {
       const link = document.createElement('a');
-      if (byName) {
-        const keyword = codeOrName.replaceAll(/\s*\([^\)]+入\)$/g, '');
-        link.textContent = '商品名で検索';
-        link.href = `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(keyword)}&search=search`;
-      }
-      else {
-        link.textContent = codeOrName;
-        link.href = `https://akizukidenshi.com/catalog/g/g${codeOrName}/`;
-      }
+      link.textContent = code;
+      link.href = `https://akizukidenshi.com/catalog/g/g${code}/`;
 
-      const qty = this.partQuantityInCart(code);
-      if (qty > 0) {
+      const quantity = this.partQuantityInCart(code);
+      if (quantity > 0) {
         setBackgroundStyle(link, COLOR_LIGHT_IN_CART);
-        link.title = `カートに入っています (${qty}個)\n${LINK_TITLE}`;
+        link.title = `カートに入っています (${quantity}個)\n${LINK_TITLE}`;
       }
       else {
         setBackgroundStyle(link, COLOR_LIGHT_HISTORY);
@@ -506,13 +533,26 @@
         item.isInCart = false;
       }
       // 表示されている商品をカートに追加
+      const now = new Date().getTime();
       for (const tr of trs) {
-        const code = tr.querySelector('.js-enhanced-ecommerce-goods').textContent.trim();
-        const name = normalizePartName(tr.querySelector('.js-enhanced-ecommerce-goods-name').textContent);
-        const qty = parseInt(tr.querySelector(`input[name="qty${index}"]`).value);
-        const part = this.partByCode(code, name);
-        const item = this.cartItemByCode(code, qty);
-        item.isInCart = true;
+        const partCode = tr.querySelector('.js-enhanced-ecommerce-goods').textContent.trim();
+        const partName = normalizePartName(tr.querySelector('.js-enhanced-ecommerce-goods-name').textContent);
+        const quantity = parseInt(tr.querySelector(`input[name="qty${index}"]`).value);
+
+        if (partCode in this.db.cart) {
+          let item = this.db.cart[partCode];
+          item.name = partName;
+          item.quantity = quantity;
+          item.isInCart = quantity > 0;
+          item.timestamp = now;
+        }
+        else {
+          this.db.cart[partCode] = new CartItem(partCode, partName, quantity, now);
+        }
+
+        // 通販コードに部品名を関連付け
+        this.partByCode(partCode, partName);
+
         index++;
       }
     }
@@ -549,7 +589,7 @@
 
       if (false) {
         const link = document.createElement('a');
-        link.href = this.getSearchUrl(part.name);
+        link.href = this.getHistorySearchUrl(part.name);
         link.textContent = "購入履歴から検索";
         link.title = LINK_TITLE;
         elems.push(link);
@@ -587,16 +627,16 @@
         const nameDiv = itemDiv.querySelector('.block-bulk-purchase-b--goods-name');
         const code = itemDiv.querySelector('input[name="goods"]').value;
         const name = normalizePartName(nameDiv.textContent);
-        const part = this.partByCode(code, name);
+        const part = this.partByCode(code, name, true);
         const imageDiv = itemDiv.querySelector('.block-bulk-purchase-b--goods-image');
         if (part.orderIds && part.orderIds.length > 0) {
           setBackgroundStyle(itemDiv, COLOR_LIGHT_HISTORY, false);
           imageDiv.appendChild(this.createHistoryBanner(part));
         }
-        const qty = this.partQuantityInCart(code);
-        if (qty > 0) {
+        const quantity = this.partQuantityInCart(code);
+        if (quantity > 0) {
           setBackgroundStyle(itemDiv, COLOR_LIGHT_IN_CART, false);
-          imageDiv.appendChild(this.createCartIcon(code, qty));
+          imageDiv.appendChild(this.createCartIcon(code, quantity));
         }
       }
     }
@@ -610,39 +650,45 @@
         const m = link.href.match(/\/catalog\/g\/g(\d+)\//);
         if (!m) continue;
         const code = m[1];
-        const part = this.partByCode(code, name);
+        const part = this.partByCode(code, name, true);
         const itemDt = itemDl.querySelector('.block-cart-i--goods-image');
         if (part.orderIds && part.orderIds.length > 0) {
           setBackgroundStyle(itemDl, COLOR_LIGHT_HISTORY);
           itemDt.appendChild(this.createHistoryBanner(part));
         }
-        const qty = this.partQuantityInCart(code);
-        if (qty > 0) {
+        const quantity = this.partQuantityInCart(code);
+        if (quantity > 0) {
           setBackgroundStyle(itemDl, COLOR_LIGHT_IN_CART);
-          itemDt.appendChild(this.createCartIcon(code, qty));
+          itemDt.appendChild(this.createCartIcon(code, quantity));
         }
       }
     }
 
-    // MARK: 注文情報をIDから取得
-    orderById(id, time) {
-      let order = new Order(id, time);
-      if (id in this.db.orders) {
+    /**
+     * MARK: 注文情報をIDから取得
+     * @param {string} orderId オーダーID
+     * @param {number} ts 注文日時
+     * @returns {Order} 注文情報
+    */
+    orderById(orderId, ts) {
+      if (orderId in this.db.orders) {
         // 既知の注文の場合はその情報をベースにする
-        order = this.db.orders[id];
+        let order = this.db.orders[orderId];
+        if (ts > 0 && order.timestamp < ts) {
+          order.timestamp = ts;
+          const oldTimeStr = order.timestamp ? new Date(order.timestamp).toLocaleString() : 'null';
+          const newTimeStr = new Date(ts).toLocaleString();
+          debugLog(`注文日時更新: ${oldTimeStr} --> ${newTimeStr}`);
+        }
+        return order;
       }
       else {
         // 新規注文の場合は登録
-        debugLog(`新規注文情報: ${id}`);
-        this.db.orders[id] = order;
+        debugLog(`新規注文情報: ${orderId}`);
+        const order = new Order(orderId, ts);
+        this.db.orders[orderId] = order;
+        return order;
       }
-      if (!order.timestamp || order.timestamp < time) {
-        const oldTimeStr = order.timestamp ? new Date(order.timestamp).toLocaleString() : 'null';
-        const newTimeStr = new Date(time).toLocaleString();
-        debugLog(`注文日時更新: ${oldTimeStr} --> ${newTimeStr}`);
-        order.timestamp = time;
-      }
-      return order;
     }
 
     // MARK: 商品画像の左下に付けるバナーを生成
@@ -650,7 +696,7 @@
       const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
 
       const link = document.createElement('a');
-      link.href = this.getSearchUrl(part.name);
+      link.href = this.getHistorySearchUrl(part.name);
       link.style.display = 'inline-block';
       link.style.backgroundColor = COLOR_DARK_HISTORY;
       link.style.padding = '1px 5px';
@@ -726,83 +772,68 @@
     }
 
     // 部品の検索用URLを生成
-    getSearchUrl(name) {
+    getPartSearchUrl(name) {
+      return `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(name)}&search=search`;
+    }
+
+    // 部品の検索用URLを生成
+    getHistorySearchUrl(name) {
       return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B`;
     }
 
-    // MARK: 部品情報をIDから取得
-    partByCode(code, name) {
-      if (!this.db.parts) this.db.parts = {};
-
-      let part = new Part(code, name);
-
-      if (code in this.db.parts) {
-        part = this.db.parts[code];
+    /** MARK: 部品情報をIDから取得
+     * @param {string} partCode 部品コード
+     * @param {string} partName 部品名
+     * @returns {Part} 部品情報
+     */
+    partByCode(partCode, partName, isLatestName = false) {
+      this.db.partCodeDict[partName] = partCode;
+      if (partCode in this.db.parts) {
+        const part = this.db.parts[partCode];
+        part.linkToName(partName, isLatestName);
+        return part;
       }
       else {
         // 新規部品の場合は登録
-        debugLog(`新規部品情報: 通販コード=${code}, 部品名=${name}`);
-        this.db.parts[code] = part;
+        debugLog(`新規部品情報: 通販コード=${partCode}, 部品名=${partName}`);
+        const part = new Part(partCode, partName);
+        this.db.parts[partCode] = part;
+        return part;
       }
-
-      const nameKey = nameKeyOf(name);
-      if (nameKey in this.db.parts) {
-        let byName = this.db.parts[nameKey];
-        if (!byName.code) {
-          debugLog(`部品名を通販コードにリンク: ${byName.name} --> ${code}`);
-          byName.code = code;
-        }
-        part.migrateFrom(byName);
-      }
-      else {
-        this.db.parts[nameKey] = new Part(code, name);
-      }
-
-      return part;
     }
 
-    // MARK: 部品情報を名前から取得
-    partByName(name) {
-      let part = new Part(null, name);
-
-      // ハッシュで参照
-      const nameKey = nameKeyOf(name);
-      if (nameKey in this.db.parts) {
-        part = this.db.parts[nameKey];
-        if (part.code && !part.code.startsWith(NAME_KEY_PREFIX) && part.code in this.db.parts) {
-          // 品番が登録済みの場合はその情報を返す
-          part = this.db.parts[part.code];
-        }
-      }
-      else {
-        // 新規部品の場合は登録
-        debugLog(`新しい部品名: ${name}`);
-        this.db.parts[nameKey] = part;
-      }
-      return part;
-    }
-
-    // MARK: カートの商品を通販コードから取得
-    cartItemByCode(code, qty) {
+    /** 
+     * MARK: カートの商品を通販コードから取得
+     * @param {string} partCode
+     * @param {string} partName
+     * @param {number} quantity
+     * @returns {CartItem}
+    */
+    cartItemByCode(partCode, partName, quantity) {
       const now = new Date().getTime();
-      let item = new CartItem(code, qty, now);
-      if (code in this.db.cart) {
+      let item = new CartItem(partCode, partName, quantity, now);
+      if (partCode in this.db.cart) {
         // 既知の商品の場合はその情報をベースにする
-        item = this.db.cart[code];
+        item = this.db.cart[partCode];
         item.isInCart = true;
         item.timestamp = now;
-        item.quantity = qty;
+        item.name = partName;
+        item.quantity = quantity;
       }
       else {
         // 新規商品の場合は登録
-        debugLog(`新しい商品: ${code}`);
-        this.db.cart[code] = item;
+        debugLog(`新しい商品: ${partCode}`);
+        this.db.cart[partCode] = item;
       }
       return item;
     }
 
-    // MARK: カートに入っている部品の数を返す
-    // 当該部品がカートに入っていない場合は 0 を返す
+    /**
+     * MARK: カートに入っている部品の数を返す。
+     * 当該部品がカートに入っていない場合は 0 を返す
+     * @param {string} code 
+     * @returns {number}
+     */
     partQuantityInCart(code) {
       if (!code || !(code in this.db.cart)) return 0;
       const cartItem = this.db.cart[code];
@@ -840,46 +871,54 @@
 
     // MARK: データベースのクリーンアップ
     async cleanupDatabase() {
-      let unusedCodes = {};
-      let unusedNameKeys = {};
-      for (const key in this.db.parts) {
-        const part = this.db.parts[key];
-        if (key.startsWith(NAME_KEY_PREFIX) && part.code) {
-          unusedNameKeys[part.code] = key;
+      let unusedPartCodes = {};
+      let unusedPartNames = {};
+      for (const partCode in this.db.parts) {
+        unusedPartCodes[partCode] = true;
+        this.db.parts[partCode].names = this.db.parts[partCode].names.filter(name => !!name);
+        for (const partName in this.db.parts[partCode].names) {
+          unusedPartNames[partName] = true;
         }
-        else {
-          unusedCodes[key] = true;
-        }
+      }
+      for (const partName in this.db.partCodeDict) {
+        unusedPartNames[partName] = true;
       }
 
       for (let order of Object.values(this.db.orders)) {
-        for (const code in order.items) {
-          if (code in unusedCodes) delete unusedCodes[code];
-          if (code in unusedNameKeys) delete unusedNameKeys[code];
+        for (let cartItem of Object.values(order.items)) {
+          if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
+          if (cartItem.name in unusedPartNames) delete unusedPartNames[cartItem.name];
         }
       }
 
       for (let cartItem of Object.values(this.db.cart)) {
-        const code = cartItem.code;
-        if (code in unusedCodes) delete unusedCodes[code];
-        if (code in unusedNameKeys) delete unusedNameKeys[code];
+        if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
+        if (cartItem.name in unusedPartNames) delete unusedPartNames[cartItem.name];
       }
 
-      let numDeleted = 0;
-      for (const code in unusedCodes) {
-        if (code in this.db.parts) {
-          delete this.db.parts[code];
-          numDeleted++;
+      let numDeletedCodes = 0;
+      for (const partCode in unusedPartCodes) {
+        if (partCode in this.db.parts) {
+          delete this.db.parts[partCode];
+          numDeletedCodes++;
         }
       }
-      for (const code in unusedNameKeys) {
-        if (code in this.db.parts) {
-          delete this.db.parts[unusedNameKeys[code]];
-          numDeleted++;
-        }
-      }
+      if (numDeletedCodes > 0) debugLog(`未使用の通販コードの削除: ${numDeletedCodes}個`);
 
-      if (numDeleted > 0) debugLog(`未使用の通販コードの削除: ${numDeleted}個`);
+      let numDeletedNames = 0;
+      for (const partName in unusedPartNames) {
+        for (let part of Object.values(this.db.parts)) {
+          if (part.names.includes(partName)) {
+            part.names.splice(part.names.indexOf(partName), 1);
+            numDeletedNames++;
+          }
+        }
+        if (partName in this.db.partCodeDict) {
+          delete this.db.partCodeDict[partName];
+          numDeletedNames++;
+        }
+      }
+      if (numDeletedNames > 0) debugLog(`未使用の部品名の削除: ${numDeletedNames}個`);
     }
 
     // MARK: データベースの保存
@@ -895,14 +934,9 @@
     }
 
     reportDatabase() {
-      let partWithName = 0;
-      for (const key in this.db.parts) {
-        if (key.startsWith(NAME_KEY_PREFIX)) {
-          partWithName++;
-        }
-      }
       debugLog(`注文情報: ${Object.keys(this.db.orders).length}件`);
-      debugLog(`部品情報: ${Object.keys(this.db.parts).length - partWithName} + ${partWithName}件`);
+      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
+      debugLog(`カート情報: ${Object.keys(this.db.cart).length}件`);
     }
   }
 
@@ -910,64 +944,155 @@
   class Database {
     constructor() {
       this.version = GM_info.script.version;
+
+      /** @type {Object.<string, string>} */
+      this.partCodeDict = {};
+
+      /** @type {Object.<string, Part>} */
       this.parts = {};
+
+      /** @type {Object.<string, Order>} */
       this.orders = {};
+
+      /** @type {Object.<string, CartItem>} */
       this.cart = {};
     }
 
+    /**
+     * @param {Object} json 
+     * @returns {Database}
+     */
     loadFromJson(json) {
       const now = new Date().getTime();
+
       for (let key in this) {
         if (key == 'parts') {
           // 部品情報
           for (let code in json.parts) {
             let part = new Part(code, null);
-            this.parts[code] = part.loadFromJson(json.parts[code]);
+            const partJson = json.parts[code];
+            if (code.startsWith(NAME_KEY_PREFIX)) {
+              // TODO: 削除 (旧バージョンのDB対応)
+              if (partJson.code) {
+                console.log(`DBマイグレーション: ${code} --> ${partJson.code}`)
+                const name = code.slice(NAME_KEY_PREFIX.length);
+                this.partCodeDict[name] = partJson.code;
+                partJson.names = [name];
+                if (partJson.name) delete partJson.name;
+              }
+            }
+            else if (partJson.name) {
+              // TODO: 削除 (旧バージョンのDB対応)
+              console.log(`DBマイグレーション: ${partJson.name} --> ${code}`)
+              this.partCodeDict[partJson.name] = code;
+              partJson.names = [partJson.name];
+              delete partJson.name;
+            }
+            this.parts[code] = part.loadFromJson(partJson);
           }
         }
         else if (key == 'orders') {
           // 注文履歴
-          for (let id in json.orders) {
+          for (const id in json.orders) {
             let order = new Order(id, now);
             this.orders[id] = order.loadFromJson(json.orders[id]);
           }
         }
         else if (key == 'cart') {
           // カート履歴
-          for (let code in json.cart) {
-            let part = new CartItem(code, QUANTITY_UNKNOWN, now);
-            this.cart[code] = part.loadFromJson(json.cart[code]);
+          for (const code in json.cart) {
+            let cartItem = new CartItem(code, null, QUANTITY_UNKNOWN, now);
+            this.cart[code] = cartItem.loadFromJson(json.cart[code]);
           }
         }
         else if (key in json) {
           this[key] = json[key];
         }
       }
+
+      {
+        // TODO: 削除 (旧バージョンのDB対応)
+        let numNameUpdates = 0;
+        let numNameUnknown = 0;
+        const updateItemName = (cartItem) => {
+          if (cartItem.name) return;
+          if (cartItem.code in this.parts) {
+            console.log(`DBマイグレーション: カートの商品名 ${cartItem.code} --> ${this.parts[cartItem.code].getName()}`);
+            const newName = this.parts[cartItem.code].getName();
+            if (newName) cartItem.name = newName;
+            numNameUpdates++;
+          }
+          else {
+            numNameUnknown++;
+          }
+        };
+        for (let order of Object.values(this.orders)) {
+          for (let cartItem of Object.values(order.items)) {
+            updateItemName(cartItem);
+          }
+        }
+        for (let cartItem of Object.values(this.cart)) {
+          updateItemName(cartItem);
+        }
+        if (numNameUpdates > 0) debugLog(`DBマイグレーション: 部品名更新=${numNameUpdates}`);
+        if (numNameUnknown > 0) debugLog(`DBマイグレーション: 部品名不明=${numNameUnknown}`);
+      }
+
       return this;
     }
   }
 
   // MARK: 部品情報
   class Part {
+    /**
+     * @param {string} code 
+     * @param {string} name 
+     */
     constructor(code, name) {
       this.code = code;
-      this.name = name;
+      this.names = name ? [name] : [];
       this.orderIds = [];
     }
 
-    linkOrder(orderId) {
+    /**
+     * @returns {string}
+     */
+    getName() {
+      return this.names.length > 0 ? this.names[0] : null;
+    }
+
+    /**
+     * @param {string} partName 
+     * @param {boolean} isLatest
+     * @returns {void}
+     */
+    linkToName(partName, isLatest = false) {
+      if (this.names.length > 0 && this.names[0] == partName) return;
+      if (this.names.includes(partName)) {
+        if (isLatest) {
+          this.names.splice(this.names.indexOf(partName), 1);
+          this.names.unshift(partName);
+        }
+      }
+      else {
+        this.names.unshift(partName);
+      }
+    }
+
+    /**
+     * @param {string} orderId
+     * @returns {void}
+     */
+    linkToOrder(orderId) {
       if (this.orderIds.includes(orderId)) return;
       debugLog(`部品情報に注文情報をリンク: ${this.code} --> ${orderId}`);
       this.orderIds.push(orderId);
     }
 
-    migrateFrom(other) {
-      for (let orderId of other.orderIds) {
-        this.linkOrder(orderId);
-      }
-      other.orderIds = [];
-    }
-
+    /**
+     * @param {Object} json
+     * @returns {Part}
+     */
     loadFromJson(json) {
       for (let key in this) {
         if (key in json) {
@@ -978,30 +1103,89 @@
     }
   }
 
+  // MARK: 買い物かごのアイテム
+  class CartItem {
+    constructor(code, name, quantity, ts = -1) {
+      this.code = code;
+      this.name = name;
+      this.quantity = quantity;
+      this.timestamp = ts;
+      this.isInCart = quantity > 0;
+    }
+
+    /**
+     * @param {Object} json
+     * @returns {CartItem}
+     */
+    loadFromJson(json) {
+      for (const key in this) {
+        if (key in json) {
+          this[key] = json[key];
+        }
+      }
+      return this;
+    }
+  }
+
   // MARK: 注文情報
   class Order {
+    /**
+     * @param {string} id 
+     * @param {number} ts 
+     */
     constructor(id, ts) {
       this.id = id;
       this.timestamp = ts;
       this.items = {};
     }
 
+    /** @returns {boolean} */
     isFilled() {
       if (this.timestamp == -1) return false;
       for (const code in this.items) {
         const item = this.items[code];
         if (code != item.code) return false;
         if (item.quantity <= 0) return false;
+        if (!item.name) return false;
       }
       return true;
     }
 
-    linkPart(partCode) {
-      if (partCode in this.items) return;
-      debugLog(`注文情報に部品を追加: ${this.id} --> ${partCode}`);
-      this.items[partCode] = new CartItem(partCode, QUANTITY_UNKNOWN, -1);
+    /**
+     * @param {string} partName 
+     * @returns {string|null}
+     */
+    partCodeFromName(partName) {
+      for (const item of Object.values(this.items)) {
+        if (item.name == partName) {
+          return item.code;
+        }
+      }
+      return null;
     }
 
+    /**
+     * @param {string} code
+     * @param {string} name
+     * @param {number} quantity
+     * @returns {void}
+     */
+    linkToPart(code, name, quantity = QUANTITY_UNKNOWN) {
+      if (code in this.items) {
+        let item = this.items[code];
+        if (name) item.name = name;
+        if (quantity > 0) item.quantity = quantity;
+      }
+      else {
+        debugLog(`注文情報に部品を追加: ${this.id} --> ${code}`);
+        this.items[code] = new CartItem(code, name, QUANTITY_UNKNOWN, -1);
+      }
+    }
+
+    /**
+     * @param {Object} json
+     * @returns {CartItem}
+     */
     loadFromJson(json) {
       // TODO: 削除 (旧バージョンのDB対応)
       if (json.time) {
@@ -1014,7 +1198,7 @@
       if (json.itemCodes) {
         json.items = {};
         for (const code of json.itemCodes) {
-          json.items[code] = new CartItem(code, QUANTITY_UNKNOWN, json.timestamp);
+          json.items[code] = new CartItem(code, null, QUANTITY_UNKNOWN, json.timestamp);
         }
         delete json.itemCodes;
         debugLog(`DBマイグレーション: Order.itemCodes --> Order.items`);
@@ -1023,7 +1207,7 @@
       for (let key in this) {
         if (key == 'items') {
           for (let code in json.items) {
-            let item = new CartItem(code, QUANTITY_UNKNOWN, json.timestamp);
+            let item = new CartItem(code, null, QUANTITY_UNKNOWN, json.timestamp);
             this.items[code] = item.loadFromJson(json.items[code]);
           }
         }
@@ -1032,26 +1216,6 @@
         }
       }
 
-      return this;
-    }
-  }
-
-  // MARK: 買い物かごのアイテム
-  class CartItem {
-    constructor(code, qty, ts) {
-      this.code = code;
-      this.quantity = qty;
-      this.timestamp = ts;
-      this.isInCart = qty > 0;
-    }
-
-    loadFromJson(json) {
-      for (let key in this) {
-        if (key in json) {
-          if (!json.quantity || json.quantity <= 0) continue;
-          this[key] = json[key];
-        }
-      }
       return this;
     }
   }
@@ -1099,6 +1263,11 @@
     return windowDiv;
   }
 
+  /**
+   * @param {string} innerHTML 
+   * @param {string} width 
+   * @returns {HTMLButtonElement}
+   */
   function createButton(innerHTML, width = null) {
     const button = document.createElement('button');
     button.innerHTML = innerHTML;
@@ -1222,11 +1391,6 @@
     if (month < 1) return `${Math.round(days)}日前`;
     if (years < 1) return `${Math.round(month * 10) / 10}ヶ月前`;
     return `${Math.round(years * 10) / 10}年前`;
-  }
-
-  // MARK: 商品名しか分からない部品用のキーを生成
-  function nameKeyOf(name) {
-    return NAME_KEY_PREFIX + normalizePartName(name).replaceAll(/[-\/\s]/g, '');
   }
 
   // MARK: 部品名を正規化
