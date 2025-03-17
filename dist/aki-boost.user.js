@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.388
+// @version     1.0.390
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -819,6 +819,15 @@
           // 注文確定やセッション切れによってカートが空になった場合を想定
           for (const item of Object.values(this.db.cart)) {
             item.isInCart = false;
+          }
+        }
+        else {
+          // 一定以上古い商品は削除する
+          const now = new Date().getTime();
+          for (const item of Object.values(this.db.cart)) {
+            if (now - item.timestamp > CART_ITEM_LIFE_TIME) {
+              delete this.db.cart[item.code];
+            }
           }
         }
         this.db.version = GM_info.script.version;
