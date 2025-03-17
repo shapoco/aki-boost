@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.496
+// @version     1.0.505
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -35,6 +35,7 @@
   const PARAGRAPH_MARGIN = '10px';
 
   const COLOR_WINDOW_BACK = '#fcfcfc';
+  const COLOR_LIGHT_GRAY = '#eee';
   const COLOR_LIGHT_HISTORY = '#def';
   const COLOR_DARK_HISTORY = '#06c';
   const COLOR_LIGHT_IN_CART = '#fde';
@@ -630,16 +631,16 @@
         for (let orderId of part.orderIds) {
           if (!(orderId in this.db.orders)) continue;
           const order = this.db.orders[orderId];
-          const span = document.createElement('span');
           const link = document.createElement('a');
           link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
           link.textContent = new Date(order.timestamp).toLocaleDateString();
           link.title = LINK_TITLE;
-          span.appendChild(link);
+          const wrap = document.createElement('span');
+          wrap.appendChild(link);
           if (code in order.items && order.items[code].quantity > 0) {
-            span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+            wrap.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
           }
-          elems.push(span);
+          elems.push(wrap);
         }
       }
       else {
@@ -659,9 +660,12 @@
       if (qtyInCart > 0) {
         const link = document.createElement('a');
         link.href = this.getCartUrl(code);
-        link.textContent = `カートに入っています (${qtyInCart}個)`;
+        link.textContent = `カートに入っています`;
         link.style.color = COLOR_DARK_IN_CART;
-        elems.push(link);
+        const wrap = document.createElement('span');
+        wrap.appendChild(link);
+        wrap.appendChild(document.createTextNode(` (${qtyInCart}個)`));
+        elems.push(wrap);
       }
 
       const div = document.createElement('div');
@@ -672,12 +676,17 @@
         if (i > 0) div.appendChild(document.createTextNode(' | '));
         div.appendChild(elems[i]);
       }
-      if (qtyInCart == 0) {
+
+      if (qtyInCart > 0) {
+        setBackgroundStyle(div, COLOR_LIGHT_IN_CART);
+      }
+      else if (part.orderIds.length > 0) {
         setBackgroundStyle(div, COLOR_LIGHT_HISTORY);
       }
       else {
-        setBackgroundStyle(div, COLOR_LIGHT_IN_CART);
+        setBackgroundStyle(div, COLOR_LIGHT_GRAY);
       }
+
       h1.parentElement.appendChild(div);
 
       // 関連商品にも強調表示を適用する
