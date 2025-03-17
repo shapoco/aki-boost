@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name        Aki Boost
+// @name        AkiBoost
 // @namespace   https://github.com/shapoco/aki-boost
 // @supportURL  https://github.com/shapoco/aki-boost
 // @updateURL   https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.505
+// @version     1.0.506
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -20,7 +20,7 @@
 
   const DEBUG_MODE = false;
 
-  const APP_NAME = 'Aki Boost';
+  const APP_NAME = 'AkiBoost';
   const SETTING_KEY = 'akibst_settings';
   const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除
   const LINK_TITLE = `${APP_NAME} が作成したリンク`;
