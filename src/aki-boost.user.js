@@ -5,7 +5,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.451
+// @version     1.0.452
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -691,12 +691,16 @@
       }
     }
 
-    // MARK: 商品画像の左下に付けるバナーを生成
+    /**
+     * MARK: 商品画像の左下に付けるバナーを生成
+     * @param {Part} part
+     * @returns {HTMLAnchorElement}
+    */
     createHistoryBanner(part) {
       const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
 
       const link = document.createElement('a');
-      link.href = this.getHistorySearchUrl(part.name);
+      link.href = this.getHistorySearchUrl(part.getName());
       link.style.display = 'inline-block';
       link.style.backgroundColor = COLOR_DARK_HISTORY;
       link.style.padding = '1px 5px';
