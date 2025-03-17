@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.495
+// @version     1.0.496
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -230,7 +230,7 @@
       windowDiv.appendChild(wrapWithParagraph('購入履歴のページを取得して内容を取り込みます。'));
 
       windowDiv.appendChild(wrapWithParagraph(
-        '⚠ 購入履歴の数だけ連続でアクセスが発生します。\n' +
+        '⚠ 初回は購入履歴の総数＋α回の連続アクセスが発生します。\n' +
         '短時間で何度も実行しないでください。繰り返し失敗する場合は\n' +
         `<a href="${GM_info.script.supportURL}" target="_blank">リポジトリ</a>\n` +
         `または <a href="https://x.com/shapoco/" target="_blank">X</a>\nで報告してください。`
@@ -369,7 +369,7 @@
         await this.saveDatabase();
 
         if (numLoaded == 0) {
-          status.textContent = '新しい購入履歴はありませんでした。';
+          status.textContent = '新しい購入履歴は見つかりませんでした。';
         }
         else {
           status.textContent = `${numLoaded} 件の購入履歴が新たに読み込まれました。リロード後に反映されます。`;
@@ -626,19 +626,24 @@
       let elems = [];
 
       // 購入履歴を列挙
-      for (let orderId of part.orderIds) {
-        if (!(orderId in this.db.orders)) continue;
-        const order = this.db.orders[orderId];
-        const span = document.createElement('span');
-        const link = document.createElement('a');
-        link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
-        link.textContent = new Date(order.timestamp).toLocaleDateString();
-        link.title = LINK_TITLE;
-        span.appendChild(link);
-        if (code in order.items && order.items[code].quantity > 0) {
-          span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+      if (part.orderIds.length > 0) {
+        for (let orderId of part.orderIds) {
+          if (!(orderId in this.db.orders)) continue;
+          const order = this.db.orders[orderId];
+          const span = document.createElement('span');
+          const link = document.createElement('a');
+          link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
+          link.textContent = new Date(order.timestamp).toLocaleDateString();
+          link.title = LINK_TITLE;
+          span.appendChild(link);
+          if (code in order.items && order.items[code].quantity > 0) {
+            span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+          }
+          elems.push(span);
         }
-        elems.push(span);
+      }
+      else {
+        elems.push(document.createTextNode('購入履歴なし'));
       }
 
       if (false) {

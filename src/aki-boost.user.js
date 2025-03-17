@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.495
+// @version     1.0.496
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -626,19 +626,24 @@
       let elems = [];
 
       // 購入履歴を列挙
-      for (let orderId of part.orderIds) {
-        if (!(orderId in this.db.orders)) continue;
-        const order = this.db.orders[orderId];
-        const span = document.createElement('span');
-        const link = document.createElement('a');
-        link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
-        link.textContent = new Date(order.timestamp).toLocaleDateString();
-        link.title = LINK_TITLE;
-        span.appendChild(link);
-        if (code in order.items && order.items[code].quantity > 0) {
-          span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+      if (part.orderIds.length > 0) {
+        for (let orderId of part.orderIds) {
+          if (!(orderId in this.db.orders)) continue;
+          const order = this.db.orders[orderId];
+          const span = document.createElement('span');
+          const link = document.createElement('a');
+          link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
+          link.textContent = new Date(order.timestamp).toLocaleDateString();
+          link.title = LINK_TITLE;
+          span.appendChild(link);
+          if (code in order.items && order.items[code].quantity > 0) {
+            span.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+          }
+          elems.push(span);
         }
-        elems.push(span);
+      }
+      else {
+        elems.push(document.createTextNode('購入履歴なし'));
       }
 
       if (false) {
