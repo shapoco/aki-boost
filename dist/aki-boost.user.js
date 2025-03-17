@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name        Aki Boost
-// @namespace   https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/
+// @namespace   https://github.com/shapoco/aki-boost
+// @supportURL  https://github.com/shapoco/aki-boost
 // @updateURL   https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.452
+// @version     1.0.495
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -24,11 +25,16 @@
   const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除
   const LINK_TITLE = `${APP_NAME} が作成したリンク`;
 
+  const HASH_MENU = 'akibst_menu';
+  const HASH_HISTORY_UPDATE = 'akibst_historyupdate';
+  const HASH_CART_HISTORY = 'akibst_carthistory';
+
   const QUANTITY_UNKNOWN = -1;
   const CART_ITEM_LIFE_TIME = 7 * 86400 * 1000;
 
   const PARAGRAPH_MARGIN = '10px';
 
+  const COLOR_WINDOW_BACK = '#fcfcfc';
   const COLOR_LIGHT_HISTORY = '#def';
   const COLOR_DARK_HISTORY = '#06c';
   const COLOR_LIGHT_IN_CART = '#fde';
@@ -39,7 +45,7 @@
       /** @type {Database} */
       this.db = new Database();
       this.menuOpenButton = document.createElement('button');
-      this.menuWindow = createWindow(`${APP_NAME} (v${GM_info.script.version})`, '250px');
+      this.menuWindow = createWindow(`${APP_NAME} (v${GM_info.script.version})`, HASH_MENU, '250px');
       this.debugMenuDiv = document.createElement('div');
       this.databaseInfoLabel = document.createElement('span');
       this.isLoggedIn = false;
@@ -69,6 +75,16 @@
       }
 
       await this.saveDatabase();
+
+      if (window.location.hash == `#${HASH_MENU}`) {
+        this.openMenuWindow();
+      }
+      else if (window.location.hash == `#${HASH_HISTORY_UPDATE}`) {
+        await this.openHistoryUpdateWindow();
+      }
+      else if (window.location.hash == `#${HASH_CART_HISTORY}`) {
+        await this.openCartHistoryWindow();
+      }
     }
 
     checkLoginState() {
@@ -132,12 +148,11 @@
 
       this.menuOpenButton.addEventListener('click', (e) => {
         if (this.menuWindow.parentNode) {
-          this.menuWindow.remove();
+          this.menuWindow.close();
         }
         else {
-          this.updateDatabaseInfo();
           this.debugMenuDiv.style.display = e.shiftKey ? 'block' : 'none';
-          document.body.appendChild(this.menuWindow);
+          this.openMenuWindow();
         }
       });
 
@@ -150,13 +165,13 @@
       });
 
       learnButton.addEventListener('click', async () => {
-        this.menuWindow.remove();
-        await this.openUpdateHistoryWindow();
+        this.menuWindow.close();
+        await this.openHistoryUpdateWindow();
       });
 
       cartHistoryButton.addEventListener('click', async () => {
-        this.menuWindow.remove();
-        await this.openCartHistoryTool();
+        this.menuWindow.close();
+        await this.openCartHistoryWindow();
       });
 
       exportButton.addEventListener('click', async () => {
@@ -195,17 +210,53 @@
         `カートのログ: ${Object.keys(this.db.cart).length}件`;
     }
 
+    openMenuWindow() {
+      this.updateDatabaseInfo();
+      this.menuWindow.open();
+    }
+
     // MARK: 購入履歴の更新
-    async openUpdateHistoryWindow() {
+    async openHistoryUpdateWindow() {
       this.menuOpenButton.disabled = true;
 
       await this.loadDatabase();
 
-      const windowDiv = createWindow('購入履歴の更新', '300px');
+      const windowDiv = createWindow('購入履歴の更新', HASH_HISTORY_UPDATE, '360px');
       windowDiv.style.position = 'fixed';
       windowDiv.style.left = '50%';
       windowDiv.style.top = '50%';
       windowDiv.style.transform = 'translate(-50%, -50%)';
+
+      windowDiv.appendChild(wrapWithParagraph('購入履歴のページを取得して内容を取り込みます。'));
+
+      windowDiv.appendChild(wrapWithParagraph(
+        '⚠ 購入履歴の数だけ連続でアクセスが発生します。\n' +
+        '短時間で何度も実行しないでください。繰り返し失敗する場合は\n' +
+        `<a href="${GM_info.script.supportURL}" target="_blank">リポジトリ</a>\n` +
+        `または <a href="https://x.com/shapoco/" target="_blank">X</a>\nで報告してください。`
+      ));
+
+      windowDiv.appendChild(document.createElement('hr'));
+
+      const SLEEP_SEC_MIN = 0;
+      const SLEEP_SEC_MAX = 10;
+      
+      const sleepSecInput = document.createElement('input');
+      sleepSecInput.type = 'number';
+      sleepSecInput.min = SLEEP_SEC_MIN;
+      sleepSecInput.max = SLEEP_SEC_MAX;
+      sleepSecInput.value = Math.max(SLEEP_SEC_MIN, Math.min(SLEEP_SEC_MAX, this.db.htmlDownloadSleepSec));
+      sleepSecInput.addEventListener('change', () => {
+        this.db.htmlDownloadSleepSec = sleepSecInput.value;
+      });
+      
+      const sleepSecLabel = document.createElement('label');
+      sleepSecLabel.textContent = 'アクセス毎のスリープ時間: ';
+      sleepSecLabel.appendChild(sleepSecInput);
+      sleepSecLabel.appendChild(document.createTextNode(' 秒'));
+      windowDiv.appendChild(wrapWithParagraph(sleepSecLabel));
+
+      windowDiv.appendChild(document.createElement('hr'));
 
       const status = wrapWithParagraph('[開始] ボタンで更新を開始します。');
       windowDiv.appendChild(status);
@@ -223,10 +274,10 @@
       p.style.textAlign = 'center';
       windowDiv.appendChild(p);
 
-      document.body.appendChild(windowDiv);
+      windowDiv.open();
 
       const onClose = () => {
-        if (windowDiv.parentNode) windowDiv.remove();
+        windowDiv.close();
         this.menuOpenButton.disabled = false;
       };
       closeButton.addEventListener('click', onClose);
@@ -235,6 +286,7 @@
       startButton.addEventListener('click', async () => {
         startButton.disabled = true;
         closeButton.disabled = true;
+        sleepSecInput.disabled = true;
         windowDiv.closeBox.disabled = true;
         progressBar.style.opacity = '1';
         await this.updateHistory(status, progressBar);
@@ -251,7 +303,7 @@
         const PAGE_STRIDE = DEBUG_MODE ? 5 : 100;
 
         status.textContent = `オーダー ID を列挙しています...`;
-        let doc = await downloadHtml(`https://akizukidenshi.com/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
+        let doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
 
         let numOrders = -1;
 
@@ -288,7 +340,7 @@
           if (!pagerNext) break;
           const nextLink = pagerNext.querySelector('a');
           if (!nextLink || nextLink.rel != 'next') break;
-          doc = await downloadHtml(nextLink.href);
+          doc = await this.downloadHtml(nextLink.href);
         }
 
         // オーダーID ごとに詳細を読み込む
@@ -299,7 +351,7 @@
             status.textContent = `購入履歴を更新しています... (${i + 1}/${orderIds.length})`;
             progressBar.value = i * 100 / orderIds.length;
 
-            const doc = await downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
+            const doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
             await this.scanHistoryDetail(doc);
 
             numLoaded++;
@@ -320,7 +372,7 @@
           status.textContent = '新しい購入履歴はありませんでした。';
         }
         else {
-          status.textContent = `${numLoaded} 件の購入履歴が新たに読み込まれました。`;
+          status.textContent = `${numLoaded} 件の購入履歴が新たに読み込まれました。リロード後に反映されます。`;
         }
         progressBar.value = 100;
       }
@@ -332,19 +384,21 @@
     }
 
     // MARK: カート履歴の表示
-    async openCartHistoryTool() {
+    async openCartHistoryWindow() {
       this.menuOpenButton.disabled = true;
 
       await this.loadDatabase();
 
-      const windowDiv = createWindow('最近カートに入れた商品', '720px');
+      const windowDiv = createWindow('最近カートに入れた商品', HASH_CART_HISTORY, '720px');
       windowDiv.style.position = 'fixed';
       windowDiv.style.left = '50%';
       windowDiv.style.top = '50%';
       windowDiv.style.transform = 'translate(-50%, -50%)';
 
       windowDiv.appendChild(wrapWithParagraph(
-        '表示内容が古い場合は一旦 <a href="https://akizukidenshi.com/catalog/cart/cart.aspx" target="_blank">カート</a> を開いてからリロードしてみてください。'
+        '「日時」はカートに入っているのを最後に確認した日時です。表示内容が古い場合は一旦\n' +
+        '<a href="https://akizukidenshi.com/catalog/cart/cart.aspx" target="_blank">カート</a>\n' +
+        'を開いてからリロードしてみてください。'
       ));
 
       let checkBoxes = [];
@@ -404,10 +458,10 @@
       p.style.textAlign = 'center';
       windowDiv.appendChild(p);
 
-      document.body.appendChild(windowDiv);
+      windowDiv.open();
 
       windowDiv.closeBox.addEventListener('click', () => {
-        windowDiv.remove();
+        windowDiv.close();
         this.menuOpenButton.disabled = false;
       });
 
@@ -942,6 +996,22 @@
       debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
       debugLog(`カート情報: ${Object.keys(this.db.cart).length}件`);
     }
+    
+
+    /**
+     * MARK: HTML をダウンロードしてパース
+     * @param {string} url 
+     * @returns {Document}
+     */
+    async downloadHtml(url) {
+      if (this.db.htmlDownloadSleepSec > 0) {
+        const sleepSec = Math.min(10, this.db.htmlDownloadSleepSec);
+        await new Promise(resolve => setTimeout(resolve, sleepSec * 1000));
+      }
+      const res = await fetch(url);
+      const parser = new DOMParser();
+      return parser.parseFromString(await res.text(), 'text/html');
+    }
   }
 
   // MARK: データベース
@@ -960,6 +1030,9 @@
 
       /** @type {Object.<string, CartItem>} */
       this.cart = {};
+
+      /** @type {number} */
+      this.htmlDownloadSleepSec = 1;
     }
 
     /**
@@ -1224,13 +1297,19 @@
     }
   }
 
-  // MARK: ウィンドウの作成
-  function createWindow(title, width = '300px') {
+  /**
+   * MARK: ウィンドウの作成
+   * @param {string} title 
+   * @param {string} hash
+   * @param {string} width 
+   * @returns {HTMLDivElement}
+   */
+  function createWindow(title, hash, width = '300px') {
     const windowDiv = document.createElement('div');
     windowDiv.style.zIndex = '10000';
     windowDiv.style.width = width;
-    windowDiv.style.backgroundColor = COLOR_LIGHT_HISTORY;
-    windowDiv.style.border = '1px solid #06c';
+    windowDiv.style.backgroundColor = COLOR_WINDOW_BACK;
+    windowDiv.style.border = `1px solid ${COLOR_DARK_HISTORY}`;
     windowDiv.style.borderRadius = '5px';
     windowDiv.style.fontSize = '12px';
     windowDiv.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
@@ -1260,8 +1339,20 @@
     closeBox.style.height = '18px';
     windowDiv.appendChild(closeBox);
     windowDiv.closeBox = closeBox;
-    closeBox.addEventListener('click', () => {
+
+    windowDiv.open = () => {
+      windowDiv.style.display = 'block';
+      document.body.appendChild(windowDiv);
+      if (hash) history.replaceState(null, null, `#${hash}`);
+    };
+
+    windowDiv.close = () => {
       windowDiv.remove();
+      if (hash) history.replaceState(null, null, '#');
+    };
+
+    closeBox.addEventListener('click', () => {
+      windowDiv.close();
     });
 
     return windowDiv;
@@ -1356,14 +1447,6 @@
       elem.style.marginRight = '5px';
       elem.style.verticalAlign = 'middle';
     }
-  }
-
-  // MARK: HTML をダウンロードしてパース
-  async function downloadHtml(url) {
-    const res = await fetch(url);
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(await res.text(), 'text/html');
-    return doc;
   }
 
   function parseDate(dateStr) {
