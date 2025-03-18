@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.506
+// @version     1.0.507
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -234,7 +234,7 @@
         '⚠ 初回は購入履歴の総数＋α回の連続アクセスが発生します。\n' +
         '短時間で何度も実行しないでください。繰り返し失敗する場合は\n' +
         `<a href="${GM_info.script.supportURL}" target="_blank">リポジトリ</a>\n` +
-        `または <a href="https://x.com/shapoco/" target="_blank">X</a>\nで報告してください。`
+        `または <a href="https://x.com/shapoco/status/1901735936603590841" target="_blank">X</a>\nで報告してください。`
       ));
 
       windowDiv.appendChild(document.createElement('hr'));
@@ -259,7 +259,7 @@
 
       windowDiv.appendChild(document.createElement('hr'));
 
-      const status = wrapWithParagraph('[開始] ボタンで更新を開始します。');
+      const status = wrapWithParagraph('[開始] ボタンで取り込みを開始します。');
       windowDiv.appendChild(status);
 
       const progressBar = document.createElement('progress');
