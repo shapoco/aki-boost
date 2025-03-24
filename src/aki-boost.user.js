@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.1.665
+// @version     1.1.668
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -251,8 +251,8 @@
         html += ' (⚠️不完全)';
       }
       html += '<br>';
-      html += `部品情報: ${Object.keys(this.db.parts).length}件<br>`;
-      html += `カート履歴: ${Object.keys(this.db.cart).length}件`;
+      html += `カート履歴: ${Object.keys(this.db.cart).length}件<br>`;
+      html += `部品情報: ${Object.keys(this.db.parts).length}件`;
       this.databaseInfoLabel.innerHTML = html;
     }
 
@@ -1040,7 +1040,7 @@
         }
         if (this.db.version != GM_info.script.version) {
           this.db.version = GM_info.script.version;
-          notify(`データベースがアップグレードされました。`);
+          notify(`${APP_NAME} が更新されました。`);
         }
         this.reportDatabase();
       }
@@ -1120,8 +1120,8 @@
 
     reportDatabase() {
       debugLog(`注文情報: ${Object.keys(this.db.orders).length}件`);
-      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
       debugLog(`カート情報: ${Object.keys(this.db.cart).length}件`);
+      debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
     }
 
 
