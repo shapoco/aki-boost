@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.1.668
+// @version     1.1.678
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -118,7 +118,7 @@
 
     // MARK: メニュー
     setupMenuWindow() {
-      this.menuOpenButton.textContent = `${DEBUG_MODE ? '🐞' : '🔧'} ${APP_NAME}`;
+      this.menuOpenButton.innerHTML = `${getIconHtml(DEBUG_MODE ? '🐞' : '🔧')} ${APP_NAME}`;
       this.menuOpenButton.style.writingMode = 'vertical-rl';
       this.menuOpenButton.style.position = 'fixed';
       this.menuOpenButton.style.left = '0px';
@@ -147,7 +147,7 @@
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
-      const learnButton = createButton('📃➜📦 購入履歴を更新', '100%');
+      const learnButton = createButton(getIconHtml('📃') + ' 購入履歴を更新', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(learnButton));
       if (!this.isLoggedIn) {
         learnButton.disabled = true;
@@ -155,10 +155,10 @@
           `購入履歴を更新する前に <a href="${SITE_URL_BASE}/catalog/customer/menu.aspx">ログイン</a> してください。`));
       }
 
-      const cartHistoryButton = createButton('📦➜🛒 最近カートに入れた商品', '100%');
+      const cartHistoryButton = createButton(getIconHtml('📦') + ' 最近カートに入れた商品', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(cartHistoryButton));
 
-      const resetButton = createButton('📦➜🗑️ データベースをリセット', '100%');
+      const resetButton = createButton(getIconHtml('🗑️') + ' データベースをリセット', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(resetButton));
 
       this.menuWindow.appendChild(document.createElement('hr'));
@@ -172,10 +172,10 @@
       this.debugMenuDiv.appendChild(document.createElement('hr'));
       this.debugMenuDiv.appendChild(wrapWithParagraph('デバッグ用機能:'));
 
-      const exportButton = createButton('📦➜📋 JSON にエクスポート', '100%');
+      const exportButton = createButton(getIconHtml('⬇') + ' JSON にエクスポート', '100%');
       this.debugMenuDiv.appendChild(wrapWithParagraph(exportButton));
 
-      const importButton = createButton('📋➜📦 JSON からインポート', '100%');
+      const importButton = createButton(getIconHtml('⬆') + ' JSON からインポート', '100%');
       this.debugMenuDiv.appendChild(wrapWithParagraph(importButton));
 
       this.debugMenuDiv.style.display = 'none';
@@ -1848,13 +1848,22 @@
    */
   function createIconSpan(emoji) {
     const span = document.createElement('span');
+    span.style.display = 'inline-block';
+    span.style.transform = 'scale(1.2)';
     span.style.fontFamily =
       '"Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", ' +
       '"Android Emoji", "Emojione Mozilla", "Twemoji Mozilla", "Segoe UI Symbol", sans-serif;';
     span.style.textShadow = '0 0 2px #000';
-    span.style.transform = 'scale(1.5)';
     span.textContent = emoji;
     return span;
+  }
+
+  /**
+   * @param {string} emoji 
+   * @returns {string}
+   */
+  function getIconHtml(emoji) {
+    return createIconSpan(emoji).outerHTML;
   }
 
   function wrapWithParagraph(elems) {
