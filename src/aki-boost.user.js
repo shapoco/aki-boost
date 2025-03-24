@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.544
+// @version     1.0.592
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-end
@@ -22,6 +22,8 @@
 
   const APP_NAME = 'AkiBoost';
   const SETTING_KEY = 'akibst_settings';
+  const HIGHLIGHT_KEYWORD_HASH = 'akibst_kwd';
+  const HIGHLIGHT_KEYWORD_SEP = ';;';
   const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除
   const LINK_TITLE = `${APP_NAME} が作成したリンク`;
 
@@ -40,6 +42,8 @@
   const COLOR_DARK_HISTORY = '#06c';
   const COLOR_LIGHT_IN_CART = '#fde';
   const COLOR_DARK_IN_CART = '#e0b';
+  const COLOR_LIGHT_HIGHLIGHT = '#cfc';
+  const COLOR_DARK_HIGHLIGHT = '#0c0';
 
   class AkiBoost {
     constructor() {
@@ -505,6 +509,9 @@
 
     // MARK: 購入履歴をスキャン
     async scanHistory(doc) {
+      const highlightKeywords = getHighlightKeywords();
+      let highlightedElement = null;
+
       const tables = Array.from(doc.querySelectorAll('.block-purchase-history--table'));
       for (let table of tables) {
         const idUls = table.querySelector('.block-purchase-history--order-detail-list');
@@ -519,17 +526,17 @@
           const partName = normalizePartName(itemDiv.textContent);
 
           // 通販コードを取得
-          let code = order.partCodeFromName(partName);
+          let partCode = order.partCodeFromName(partName);
           if (partName in this.db.partCodeDict) {
-            code = this.db.partCodeDict[partName];
+            partCode = this.db.partCodeDict[partName];
           }
 
           itemDiv.innerHTML = '';
-          if (code) {
-            const part = this.partByCode(code, partName);
+          if (partCode) {
+            const part = this.partByCode(partCode, partName);
             part.linkToOrder(orderId);
-            order.linkToPart(code, partName);
-            itemDiv.appendChild(this.createPartCodeLink(code));
+            order.linkToPart(partCode, partName);
+            itemDiv.appendChild(this.createPartCodeLink(partCode));
           }
           else {
             // 通販コード不明
@@ -542,12 +549,23 @@
             itemDiv.appendChild(link);
           }
           itemDiv.appendChild(document.createTextNode(partName));
+
+          // キーワードハイライト
+          if (highlightKeywordMatch(highlightKeywords, partCode, partName)) {
+            highlightElement(itemDiv.parentElement);
+            if (!highlightedElement) highlightedElement = itemDiv;
+          }
         }
       }
+
+      //await focusHighlightedElement(highlightedElement);
     }
 
     // MARK: 購入履歴詳細をスキャン
     async scanHistoryDetail(doc) {
+      const highlightKeywords = getHighlightKeywords();
+      let highlightedElement = null;
+
       const orderId = doc.querySelector('.block-purchase-history-detail--order-id').textContent.trim();
       const time = parseDate(doc.querySelector('.block-purchase-history-detail--order-dt').textContent);
       const partTableTbody = doc.querySelector('.block-purchase-history-detail--order-detail-items tbody');
@@ -572,7 +590,15 @@
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
         partCodeDiv.appendChild(this.createPartCodeLink(partCode));
+
+        // キーワードハイライト
+        if (highlightKeywordMatch(highlightKeywords, partCode, partName)) {
+          highlightElement(partRow);
+          if (!highlightedElement) highlightedElement = partRow;
+        }
       }
+
+      //await focusHighlightedElement(highlightedElement);
     }
 
     // 部品ページへのリンクを作成
@@ -596,6 +622,9 @@
 
     // MARK: カートをスキャン
     async scanCart(doc) {
+      const highlightKeywords = getHighlightKeywords();
+      let highlightedElement = null;
+
       const trs = Array.from(doc.querySelectorAll('.block-cart--goods-list'));
       let index = 1;
       // 一旦全ての商品をカートから外す
@@ -623,15 +652,28 @@
         // 通販コードに部品名を関連付け
         this.partByCode(partCode, partName);
 
+        // キーワードハイライト
+        if (highlightKeywordMatch(highlightKeywords, partCode, partName)) {
+          highlightElement(tr);
+          for (let td of tr.querySelectorAll('td')) {
+            td.style.backgroundColor = 'transparent';
+          }
+          if (!highlightedElement) highlightedElement = tr;
+        }
+
         index++;
       }
+
+      await focusHighlightedElement(highlightedElement);
     }
 
     // MARK: 商品ページを修正
     async fixItemPage(doc) {
-      const code = doc.querySelector('#hidden_goods').value;
-      const name = normalizePartName(doc.querySelector('#hidden_goods_name').value);
-      const part = this.partByCode(code, name);
+      const part = this.partByCode(
+        doc.querySelector('#hidden_goods').value,
+        normalizePartName(doc.querySelector('#hidden_goods_name').value),
+        true
+      );
 
       const h1 = doc.querySelector('.block-goods-name--text');
       if (!h1) {
@@ -647,13 +689,13 @@
           if (!(orderId in this.db.orders)) continue;
           const order = this.db.orders[orderId];
           const link = document.createElement('a');
-          link.href = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${orderId}`;
+          link.href = getHistoryDetailUrlFromId(orderId, part);
           link.textContent = new Date(order.timestamp).toLocaleDateString();
           link.title = LINK_TITLE;
           const wrap = document.createElement('span');
           wrap.appendChild(link);
-          if (code in order.items && order.items[code].quantity > 0) {
-            wrap.appendChild(document.createTextNode(` (${order.items[code].quantity}個)`));
+          if (part.code in order.items && order.items[part.code].quantity > 0) {
+            wrap.appendChild(document.createTextNode(` (${order.items[part.code].quantity}個)`));
           }
           elems.push(wrap);
         }
@@ -664,17 +706,17 @@
 
       if (false) {
         const link = document.createElement('a');
-        link.href = getHistorySearchUrl(part.name);
+        link.href = getHistorySearchUrl(part);
         link.textContent = "購入履歴から検索";
         link.title = LINK_TITLE;
         elems.push(link);
       }
 
       // カートに入っている商品の情報
-      const qtyInCart = this.partQuantityInCart(code);
+      const qtyInCart = this.partQuantityInCart(part.code);
       if (qtyInCart > 0) {
         const link = document.createElement('a');
-        link.href = getCartUrl(code);
+        link.href = getCartUrl(part);
         link.textContent = `カートに入っています`;
         link.style.color = COLOR_DARK_IN_CART;
         const wrap = document.createElement('span');
@@ -742,7 +784,7 @@
         const quantity = this.partQuantityInCart(code);
         if (quantity > 0) {
           setBackgroundStyle(itemDl, COLOR_LIGHT_IN_CART);
-          itemDt.appendChild(this.createCartIcon(code, quantity));
+          itemDt.appendChild(this.createCartIcon(part, quantity));
         }
       }
     }
@@ -793,10 +835,10 @@
 
       const link = document.createElement('a');
       if (orders.length == 1) {
-        link.href = orders[0].getDetailUrl(part.code);
+        link.href = orders[0].getDetailUrl(part);
       }
       else {
-        link.href = getHistorySearchUrl(part.getName());
+        link.href = getHistorySearchUrl(part);
       }
       link.style.display = 'inline-block';
       link.style.backgroundColor = COLOR_DARK_HISTORY;
@@ -834,9 +876,9 @@
     }
 
     // MARK: カートに入っていることを示すアイコンを生成
-    createCartIcon(partCode, quantity) {
+    createCartIcon(part, quantity) {
       const link = document.createElement('a');
-      link.href = getCartUrl(partCode);
+      link.href = getCartUrl(part);
       link.style.display = 'inline-block';
       link.style.minWidth = '20px';
       link.style.height = '20px';
@@ -1237,11 +1279,11 @@
     }
 
     /**
-     * @param {string} kwd 
+     * @param {string|Array|Part} kwds
      * @returns {string}
      */
-    getDetailUrl(kwd = null) {
-      return getHistoryDetailUrlFromId(this.id, kwd);
+    getDetailUrl(kwds = null) {
+      return getHistoryDetailUrlFromId(this.id, kwds);
     }
 
     /**
@@ -1313,9 +1355,13 @@
     }
   }
 
-  function getCartUrl(kwd = null) {
+  /**
+   * カートのURLを生成
+   * @param {string|Array|Part} kwds
+   */
+  function getCartUrl(kwds = null) {
     let url = 'https://akizukidenshi.com/catalog/cart/cart.aspx';
-    if (!!kwd) url += `#:~:text=${encodeURIComponent(kwd)}`;
+    if (!!kwds) url += '#' + encodeHeightlightKeywords(kwds);
     return url;
   }
 
@@ -1330,23 +1376,107 @@
 
   /**
    * 購入履歴検索用URLを生成
-   * @param {string} partName 
+   * @param {Part|string} partOrName 
    * @returns {string}
    */
-  function getHistorySearchUrl(partName) {
-    return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(partName)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B#:~:text=${encodeURIComponent(partName)}`;
+  function getHistorySearchUrl(partOrName) {
+    const name =
+      partOrName instanceof Part ?
+        partOrName.getName() :
+        partOrName;
+    return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B#${encodeHeightlightKeywords(partOrName)}`;
   }
 
   /**
    * 購入履歴のURLを生成
    * @param {string} orderId 
-   * @param {string} kwd 
+   * @param {string|Array|Part} kwds
    * @returns {string}
    */
-  function getHistoryDetailUrlFromId(orderId, kwd = null) {
+  function getHistoryDetailUrlFromId(orderId, kwds = null) {
     let url = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`;
-    if (!!kwd) url += `#:~:text=${encodeURIComponent(kwd)}`;
+    if (!!kwds) url += '#' + encodeHeightlightKeywords(kwds);
     return url;
+  }
+
+  /**
+   * ハイライト用のキーワードをエンコードする
+   * @param {string|Array|Part} kwds
+   */
+  function encodeHeightlightKeywords(kwds) {
+    if (!Array.isArray(kwds)) kwds = [kwds];
+    let encKeys = [];
+    for (let key of kwds) {
+      if (key instanceof Part) {
+        encKeys.push(key.code);
+        key.names.forEach(name => encKeys.push(name));
+      }
+      else {
+        encKeys.push(toString(key));
+      }
+    }
+    return HIGHLIGHT_KEYWORD_HASH + '=' + encodeURIComponent(encKeys.join(HIGHLIGHT_KEYWORD_SEP));
+  }
+
+  /**
+   * URLのハッシュからハイライト用キーワードを抽出する
+   * @returns {string|null}
+   */
+  function getHighlightKeywords() {
+    const hash = window.location.hash;
+    if (hash.startsWith(`#${HIGHLIGHT_KEYWORD_HASH}=`)) {
+      const kwds = decodeURIComponent(hash.slice(HIGHLIGHT_KEYWORD_HASH.length + 2)).split(HIGHLIGHT_KEYWORD_SEP);
+      debugLog(`ハイライトキーワード: '${kwds}'`);
+      return kwds;
+    }
+    else {
+      return null;
+    }
+  }
+
+  /**
+   * @param {Array} kwds 
+   * @param {string} partCode 
+   * @param {string} partName 
+   * @returns {boolean}
+   */
+  function highlightKeywordMatch(kwds, partCode, partName) {
+    if (!kwds) return false;
+    for (const kwd of kwds) {
+      if (partCode) {
+        const keyCode = toNarrow(kwd).trim();
+        partCode = toNarrow(partCode).trim();
+        if (partCode == keyCode) return true;
+      }
+      if (partName) {
+        const keyName = normalizePartName(kwd).toLowerCase();
+        partName = normalizePartName(partName).toLowerCase();
+        if (partName.indexOf(keyName) >= 0) return true;
+      }
+    }
+    return false;
+  }
+  
+  /**
+   * @param {HTMLElement} elm
+   */
+  function highlightElement(elm) {
+    if (!elm) return;
+    elm.style.backgroundColor = COLOR_LIGHT_HIGHLIGHT;
+    elm.title = `${APP_NAME} による強調表示`;
+  }
+
+  /**
+   * @param {HTMLElement} elm
+   */
+  async function focusHighlightedElement(elm) {
+    if (!elm) return;
+    await setTimeout(async () => {
+      const rect = elm.getBoundingClientRect();
+      if (window.innerHeight < rect.bottom) {
+        elm.scrollIntoView();
+      }
+    }, 100);
   }
 
   /**
