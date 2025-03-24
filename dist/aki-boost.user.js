@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.601
+// @version     1.0.656
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -59,6 +59,8 @@
     }
 
     async start() {
+      const now = new Date().getTime();
+
       this.checkLoginState();
 
       await this.loadDatabase();
@@ -66,10 +68,16 @@
       this.setupMenuWindow();
 
       if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/customer/history.aspx`)) {
-        await this.scanHistory(document);
+        const changed = await this.scanHistory(document);
+        if (changed) {
+          notify(`いくつかの注文履歴を学習しました。`);
+        }
       }
       else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/customer/historydetail.aspx`)) {
-        await this.scanHistoryDetail(document);
+        const changed = await this.scanHistoryDetail(document);
+        if (changed) {
+          notify(`この注文履歴を学習しました。`);
+        }
       }
       else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/cart/cart.aspx`)) {
         await this.scanCart(document);
@@ -80,6 +88,11 @@
       else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/`)) {
         await this.fixCatalog(document);
       }
+
+      if (!this.isLoggedIn && now > this.db.lastLoginRecommendedTime + 86400 * 1000) {
+        notify('最新の注文履歴を反映するには、ログインして「注文履歴の更新」を実施してください。');
+      }
+      this.db.lastLoginRecommendedTime = now;
 
       await this.saveDatabase();
 
@@ -92,6 +105,9 @@
       else if (window.location.hash == `#${HASH_CART_HISTORY}`) {
         await this.openCartHistoryWindow();
       }
+
+      // カートの商品数は遅れて反映されるのでしばらく待ってからチェックする
+      setTimeout(async () => await this.checkCartIsEmpty(), 3000);
     }
 
     checkLoginState() {
@@ -162,9 +178,6 @@
       const importButton = createButton('📋➜📦 JSON からインポート', '100%');
       this.debugMenuDiv.appendChild(wrapWithParagraph(importButton));
 
-      const debugStatus = wrapWithParagraph('');
-      this.debugMenuDiv.appendChild(debugStatus);
-
       this.debugMenuDiv.style.display = 'none';
       this.menuWindow.appendChild(this.debugMenuDiv);
 
@@ -183,6 +196,7 @@
           this.db = new Database();
           await this.saveDatabase();
           this.updateDatabaseInfo();
+          notify('データベースをリセットしました。');
         }
       });
 
@@ -200,11 +214,11 @@
         try {
           this.cleanupDatabase();
           await navigator.clipboard.writeText(JSON.stringify(this.db));
-          debugStatus.textContent = 'クリップボードにコピーしました。';
+          notify('JSON 形式でクリップボードにコピーしました。');
         }
-        catch (e) {
-          debugError(e);
-          debugStatus.textContent = 'クリップボードへのコピーに失敗しました。';
+        catch (ex) {
+          debugError(ex);
+          notify(`クリップボードへのコピーに失敗しました。\n${ex.message}`, true);
         }
       });
 
@@ -216,20 +230,30 @@
           this.db.loadFromJson(JSON.parse(json));
           await this.saveDatabase();
           this.updateDatabaseInfo();
-          debugStatus.textContent = 'クリップボードからインポートしました。';
+          if (this.db.isFilled()) {
+            notify('クリップボードからインポートしました。');
+          }
+          else {
+            notify('クリップボードからインポートしましたが、データが不完全です。', true);
+          }
         }
-        catch (e) {
-          debugError(e);
-          debugStatus.textContent = 'インポートに失敗しました。';
+        catch (ex) {
+          debugError(ex);
+          notify(`インポートに失敗しました。\n${ex.message}`, true);
         }
       });
     }
 
     updateDatabaseInfo() {
-      this.databaseInfoLabel.innerHTML =
-        `記憶している注文情報: ${Object.keys(this.db.orders).length}件<br>` +
-        `記憶している部品情報: ${Object.keys(this.db.parts).length}件<br>` +
-        `カートのログ: ${Object.keys(this.db.cart).length}件`;
+      let html = '';
+      html += `注文履歴: ${Object.keys(this.db.orders).length}件`;
+      if (!this.db.isFilled()) {
+        html += ' (⚠️不完全)';
+      }
+      html += '<br>';
+      html += `部品情報: ${Object.keys(this.db.parts).length}件<br>`;
+      html += `カート履歴: ${Object.keys(this.db.cart).length}件`;
+      this.databaseInfoLabel.innerHTML = html;
     }
 
     openMenuWindow() {
@@ -252,7 +276,7 @@
       windowDiv.appendChild(wrapWithParagraph('購入履歴のページを取得して内容を取り込みます。'));
 
       windowDiv.appendChild(wrapWithParagraph(
-        '⚠ 初回は購入履歴の総数＋α回の連続アクセスが発生します。\n' +
+        '⚠️ 初回は購入履歴の総数＋α回の連続アクセスが発生します。\n' +
         '短時間で何度も実行しないでください。繰り返し失敗する場合は\n' +
         `<a href="${GM_info.script.supportURL}" target="_blank">リポジトリ</a>\n` +
         `または <a href="https://x.com/shapoco/status/1901735936603590841" target="_blank">X</a>\nで報告してください。`
@@ -399,7 +423,7 @@
         progressBar.value = 100;
       }
       catch (e) {
-        const msg = `⚠ 読み込みに失敗しました`;
+        const msg = `⚠️ 読み込みに失敗しました`;
         debugError(`${msg}: ${e}`);
         status.textContent = msg;
       }
@@ -509,10 +533,16 @@
       });
     }
 
-    // MARK: 購入履歴をスキャン
+    /**
+     * MARK: 購入履歴をスキャン
+     * @param {Document} doc 
+     * @returns {boolean} データベースが変更されたかどうか
+     */
     async scanHistory(doc) {
       const highlightKeywords = getHighlightKeywords();
       let highlightedElement = null;
+
+      let changed = false;
 
       const tables = Array.from(doc.querySelectorAll('.block-purchase-history--table'));
       for (let table of tables) {
@@ -520,12 +550,14 @@
 
         const orderId = idUls.querySelector('a').textContent.trim();
         const time = parseDate(table.querySelector('.block-purchase-history--order_dt').textContent);
+
+        changed |= !(orderId in this.db.orders);
         let order = this.orderById(orderId, time);
 
         const itemDivs = Array.from(table.querySelectorAll('.block-purchase-history--goods-name'));
         for (let itemDiv of itemDivs) {
           // 部品情報の取得
-          const partName = normalizePartName(itemDiv.textContent);
+          let partName = normalizePartName(itemDiv.textContent);
 
           // 通販コードを取得
           let partCode = order.partCodeFromName(partName);
@@ -533,11 +565,17 @@
             partCode = this.db.partCodeDict[partName];
           }
 
+          // 既に記憶している部品名がある場合はそれに合わせる
+          if (partCode && partCode in order.items) {
+            const cartItem = order.items[partCode];
+            if (!!cartItem.name) partName = cartItem.name;
+          }
+
           itemDiv.innerHTML = '';
           if (partCode) {
             const part = this.partByCode(partCode, partName);
-            part.linkToOrder(orderId);
-            order.linkToPart(partCode, partName);
+            changed |= part.linkToOrder(orderId);
+            changed |= order.linkToPart(partCode, partName);
             itemDiv.appendChild(this.createPartCodeLink(partCode));
           }
           else {
@@ -561,9 +599,14 @@
       }
 
       //await focusHighlightedElement(highlightedElement);
+
+      return changed;
     }
 
-    // MARK: 購入履歴詳細をスキャン
+    /** 
+     * @param {Document} doc
+     * @returns {Promise<boolean>} データベースが変更されたかどうか
+     */
     async scanHistoryDetail(doc) {
       const highlightKeywords = getHighlightKeywords();
       let highlightedElement = null;
@@ -573,6 +616,9 @@
       const partTableTbody = doc.querySelector('.block-purchase-history-detail--order-detail-items tbody');
       const partRows = Array.from(partTableTbody.querySelectorAll('tr'));
 
+      let changed = false;
+
+      changed |= !(orderId in this.db.orders);
       let order = this.orderById(orderId, time);
 
       for (let partRow of partRows) {
@@ -586,8 +632,8 @@
 
         // データベース更新
         let part = this.partByCode(partCode, partName);
-        part.linkToOrder(orderId);
-        order.linkToPart(partCode, partName, quantity);
+        changed |= part.linkToOrder(orderId);
+        changed |= order.linkToPart(partCode, partName, quantity);
 
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
@@ -601,6 +647,8 @@
       }
 
       //await focusHighlightedElement(highlightedElement);
+
+      return changed;
     }
 
     // 部品ページへのリンクを作成
@@ -785,6 +833,24 @@
         if (quantity > 0) {
           setBackgroundStyle(itemDl, COLOR_LIGHT_IN_CART);
           itemDt.appendChild(this.createCartIcon(part, quantity));
+        }
+      }
+    }
+
+    async checkCartIsEmpty() {
+      const countSpan = document.querySelector('.block-headernav--cart-count');
+      if (!countSpan) return;
+      if (countSpan.textContent.length == 0 || parseInt(countSpan.textContent) == 0) {
+        let changed = false;
+        for (let part of Object.values(this.db.cart)) {
+          if (part.isInCart) {
+            part.isInCart = false;
+            changed = true;
+          }
+        }
+        if (changed) {
+          await this.saveDatabase();
+          notify('カートが空になったようです。');
         }
       }
     }
@@ -1103,6 +1169,33 @@
        * @type {number}
        */
       this.htmlDownloadSleepSec = 1;
+
+      /**
+       * 最後にログインを促した時刻
+       * @type {number}
+       */
+      this.lastLoginRecommendedTime = 0;
+    }
+
+    /** @returns {boolean} */
+    isFilled() {
+      for (let orderId in this.orders) {
+        if (isBadKey(orderId)) {
+          debugError(`[Database.isFilled] オーダーIDが不正 (${orderId})`);
+          return false;
+        }
+
+        const order = this.orders[orderId];
+        if (order.id != orderId) {
+          debugError(`[Database.isFilled] オーダーID不一致 (${order.id} != ${orderId})`);
+          return false;
+        }
+        if (!order.isFilled()) {
+          debugError(`[Database.isFilled] 不完全な注文履歴 (${orderId})`);
+          return false;
+        }
+      }
+      return true;
     }
 
     /**
@@ -1116,6 +1209,11 @@
         if (key == 'parts') {
           // 部品情報
           for (let code in json.parts) {
+            if (isBadKey(code)) {
+              debugError(`[DB] 不正な通販コードを削除しました`);
+              continue;
+            }
+
             let part = new Part(code, null);
             const partJson = json.parts[code];
             if (code.startsWith(NAME_KEY_PREFIX)) {
@@ -1224,30 +1322,38 @@
 
     /**
      * @param {string} partName 
-     * @param {boolean} isLatest
-     * @returns {void}
+     * @param {boolean} isLatestName
+     * @returns {boolean}
      */
-    linkToName(partName, isLatest = false) {
-      if (this.names.length > 0 && this.names[0] == partName) return;
+    linkToName(partName, isLatestName = false) {
+      if (this.names.length > 0 && this.names[0] == partName) {
+        return false;
+      }
+
+      let changed = false;
       if (this.names.includes(partName)) {
-        if (isLatest) {
+        if (isLatestName) {
           this.names.splice(this.names.indexOf(partName), 1);
           this.names.unshift(partName);
+          changed = true;
         }
       }
       else {
         this.names.unshift(partName);
+        changed = true;
       }
+      return changed;
     }
 
     /**
      * @param {string} orderId
-     * @returns {void}
+     * @returns {boolean}
      */
     linkToOrder(orderId) {
-      if (this.orderIds.includes(orderId)) return;
+      if (this.orderIds.includes(orderId)) return false;
       debugLog(`部品情報に注文情報をリンク: ${this.code} --> ${orderId}`);
       this.orderIds.push(orderId);
+      return true;
     }
 
     /**
@@ -1257,6 +1363,10 @@
     loadFromJson(json) {
       for (let key in this) {
         if (key in json) {
+          if (isBadKey(key)) {
+            debugError(`[Part.loadFromJson] 不正なキーを削除しました`);
+            continue;
+          }
           this[key] = json[key];
         }
       }
@@ -1311,6 +1421,10 @@
     loadFromJson(json) {
       for (const key in this) {
         if (key in json) {
+          if (isBadKey(key)) {
+            debugError(`[CartItem.loadFromJson] 不正なキーを削除しました`);
+            continue;
+          }
           this[key] = json[key];
         }
       }
@@ -1346,14 +1460,37 @@
 
     /** @returns {boolean} */
     isFilled() {
-      if (this.timestamp == -1) return false;
-      if (Object.keys(this.items).length == 0) return false;
+      if (this.timestamp < 0) {
+        debugError(`[Order.isFilled] ${this.id}: 注文日時が不明`);
+        return false;
+      }
+      if (Object.keys(this.items).length == 0) {
+        debugError(`[Order.isFilled] ${this.id}: 商品が含まれていない`);
+        return false;
+      }
       for (const code in this.items) {
+        if (isBadKey(code)) {
+          debugError(`[Order.isFilled] ${this.id}: 通販コードが不正 (${code})`);
+          return false;
+        }
+
         const item = this.items[code];
-        if (code.startsWith(NAME_KEY_PREFIX)) return false; // TODO: 削除 (旧バージョンのDB対応)
-        if (code != item.code) return false;
-        if (item.quantity <= 0) return false;
-        if (!item.name) return false;
+        if (code.startsWith(NAME_KEY_PREFIX)) {
+          debugError(`[Order.isFilled] ${this.id}: 古い形式の通販コード (${code})`);
+          return false; // TODO: 削除 (旧バージョンのDB対応)
+        }
+        if (code != item.code) {
+          debugError(`[Order.isFilled] ${this.id}: 通販コードの不一致 (${code} != ${item.code})`);
+          return false;
+        }
+        if (item.quantity <= 0) {
+          debugError(`[Order.isFilled] ${this.id}: 数量が不明 (${code})`);
+          return false;
+        }
+        if (!item.name) {
+          debugError(`[Order.isFilled] ${this.id}: 商品名が不明 (${code})`);
+          return false;
+        }
       }
       return true;
     }
@@ -1380,21 +1517,32 @@
     }
 
     /**
-     * @param {string} code
-     * @param {string} name
+     * @param {string} partCode
+     * @param {string} partName
      * @param {number} quantity
-     * @returns {void}
+     * @returns {boolean}
      */
-    linkToPart(code, name, quantity = QUANTITY_UNKNOWN) {
-      if (code in this.items) {
-        let item = this.items[code];
-        if (name) item.name = name;
-        if (quantity > 0) item.quantity = quantity;
+    linkToPart(partCode, partName, quantity = QUANTITY_UNKNOWN) {
+      let changed = false;
+
+      if (partCode in this.items) {
+        let item = this.items[partCode];
+        if (item.name != partName) {
+          item.name = partName;
+          changed = true;
+        }
+        if (item.quantity != quantity && quantity > 0) {
+          item.quantity = quantity;
+          changed = true;
+        }
       }
       else {
-        debugLog(`注文情報に部品を追加: ${this.id} --> ${code}`);
-        this.items[code] = new CartItem(code, name, QUANTITY_UNKNOWN, -1);
+        debugLog(`注文情報に部品を追加: ${this.id} --> ${partCode}`);
+        this.items[partCode] = new CartItem(partCode, partName, quantity, -1);
+        changed = true;
       }
+
+      return changed;
     }
 
     /**
@@ -1413,6 +1561,10 @@
       if (json.itemCodes) {
         json.items = {};
         for (const code of json.itemCodes) {
+          if (isBadKey(code)) {
+            debugError(`[Order.loadFromJson] ${this.id}: 不正な通販コードを削除しました`);
+            continue;
+          }
           json.items[code] = new CartItem(code, null, QUANTITY_UNKNOWN, json.timestamp);
         }
         delete json.itemCodes;
@@ -1422,11 +1574,19 @@
       for (let key in this) {
         if (key == 'items') {
           for (let code in json.items) {
+            if (isBadKey(code)) {
+              debugError(`[Order.loadFromJson] ${this.id}: 不正な通販コードを削除しました`);
+              continue;
+            }
             let item = new CartItem(code, null, QUANTITY_UNKNOWN, json.timestamp);
             this.items[code] = item.loadFromJson(json.items[code]);
           }
         }
         else if (key in json) {
+          if (isBadKey(key)) {
+            debugError(`[Order.loadFromJson] 不正なキーを削除しました`);
+            continue;
+          }
           this[key] = json[key];
         }
       }
@@ -1676,6 +1836,21 @@
     return td;
   }
 
+  /**
+   * @param {string} emoji 
+   * @returns {HTMLSpanElement}
+   */
+  function createIconSpan(emoji) {
+    const span = document.createElement('span');
+    span.style.fontFamily =
+      '"Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", ' +
+      '"Android Emoji", "Emojione Mozilla", "Twemoji Mozilla", "Segoe UI Symbol", sans-serif;';
+    span.style.textShadow = '0 0 2px #000';
+    span.style.transform = 'scale(1.5)';
+    span.textContent = emoji;
+    return span;
+  }
+
   function wrapWithParagraph(elems) {
     const p = document.createElement('p');
     p.style.margin = PARAGRAPH_MARGIN;
@@ -1709,6 +1884,49 @@
       elem.style.marginRight = '5px';
       elem.style.verticalAlign = 'middle';
     }
+  }
+
+  /**
+   * @param {string} msg 
+   * @param {boolean} error 
+   */
+  function notify(msg, error = false) {
+    debugLog(`通知: [${error ? 'エラー' : '情報'}]: ${msg}`);
+
+    const notifyWindow = document.createElement('div');
+    notifyWindow.style.position = 'fixed';
+    notifyWindow.style.zIndex = '10000';
+    notifyWindow.style.bottom = '20px';
+    notifyWindow.style.left = '20px';
+    notifyWindow.style.opacity = '0';
+    notifyWindow.style.backgroundColor = '#fff';
+    notifyWindow.style.border = `2px solid ${COLOR_DARK_HISTORY}`;
+    notifyWindow.style.borderRadius = '5px';
+    notifyWindow.style.padding = '10px';
+    notifyWindow.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
+    notifyWindow.style.fontSize = '12px';
+    notifyWindow.style.lineHeight = '12px';
+
+    const iconSpan = createIconSpan(error ? '⚠️' : 'ℹ️');
+    iconSpan.style.marginRight = '10px';
+    notifyWindow.appendChild(iconSpan);
+
+    const msgSpan = document.createElement('span');
+    msgSpan.innerHTML = escapeForHtml(msg).replaceAll(/\r?\n/g, '<br>');
+
+    notifyWindow.appendChild(msgSpan);
+    document.body.appendChild(notifyWindow);
+
+    const T1 = 200;
+    const T2 = T1 + 3000 + Math.round(msg.length * 100);
+    const T3 = T2 + 500;
+    notifyWindow.animate({
+      transform: ['translateY(50px)', 'translateY(0px)', 'translateY(0px)', 'translateY(0px)'],
+      opacity: [0, 1, 1, 0],
+      offset: [null, T1 / T3, T2 / T3],
+    }, T3).onfinish = () => {
+      notifyWindow.remove();
+    };
   }
 
   function parseDate(dateStr) {
@@ -1769,6 +1987,26 @@
       .replaceAll('＼', '\\');
     console.assert(orig.length == ret.length);
     return ret;
+  }
+
+  /**
+   * HTML向けに特殊文字をエスケープする
+   * @param {string} s 
+   * @returns {string}
+   */
+  function escapeForHtml(s) {
+    return (s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+      .replaceAll(" ", '&nbsp;')
+      .replaceAll("　", '&#x3000;'));
+  }
+
+  function isBadKey(key) {
+    return !key || (key == 'null') || (key == 'undefined');
   }
 
   function debugLog(msg) {
