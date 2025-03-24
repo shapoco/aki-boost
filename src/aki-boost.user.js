@@ -6,7 +6,7 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.656
+// @version     1.1.665
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -1027,19 +1027,25 @@
     // MARK: データベースの読み込み
     async loadDatabase() {
       try {
-        this.db.loadFromJson(JSON.parse(await GM.getValue(SETTING_KEY)));
-        // 一定以上古い商品は削除する
-        const now = new Date().getTime();
-        for (const item of Object.values(this.db.cart)) {
-          if (now - item.timestamp > CART_ITEM_LIFE_TIME) {
-            delete this.db.cart[item.code];
+        const dbStr = await GM.getValue(SETTING_KEY);
+        if (dbStr) {
+          this.db.loadFromJson(JSON.parse(dbStr));
+          // 一定以上古い商品は削除する
+          const now = new Date().getTime();
+          for (const item of Object.values(this.db.cart)) {
+            if (now - item.timestamp > CART_ITEM_LIFE_TIME) {
+              delete this.db.cart[item.code];
+            }
           }
         }
-        this.db.version = GM_info.script.version;
+        if (this.db.version != GM_info.script.version) {
+          this.db.version = GM_info.script.version;
+          notify(`データベースがアップグレードされました。`);
+        }
         this.reportDatabase();
       }
       catch (e) {
-        debugError(`データベースの読み込みに失敗しました: ${e}`);
+        notify(`データベースの読み込みに失敗しました\n${e}`);
       }
     }
 
@@ -1902,19 +1908,25 @@
     notifyWindow.style.backgroundColor = '#fff';
     notifyWindow.style.border = `2px solid ${COLOR_DARK_HISTORY}`;
     notifyWindow.style.borderRadius = '5px';
-    notifyWindow.style.padding = '10px';
+    notifyWindow.style.padding = '0px';
     notifyWindow.style.boxShadow = '0 3px 5px rgba(0,0,0,0.5)';
     notifyWindow.style.fontSize = '12px';
-    notifyWindow.style.lineHeight = '12px';
+    notifyWindow.style.lineHeight = '18px';
+
+    const caption = document.createElement('div');
+    caption.textContent = APP_NAME;
+    caption.style.backgroundColor = COLOR_DARK_HISTORY;
+    caption.style.color = '#fff';
+    caption.style.padding = '2px 5px';
+    caption.style.fontWeight = 'bold';
+    notifyWindow.appendChild(caption);
 
     const iconSpan = createIconSpan(error ? '⚠️' : 'ℹ️');
-    iconSpan.style.marginRight = '10px';
-    notifyWindow.appendChild(iconSpan);
-
+    iconSpan.style.marginRight = '5px';
     const msgSpan = document.createElement('span');
     msgSpan.innerHTML = escapeForHtml(msg).replaceAll(/\r?\n/g, '<br>');
+    notifyWindow.appendChild(wrapWithParagraph([iconSpan, msgSpan]));
 
-    notifyWindow.appendChild(msgSpan);
     document.body.appendChild(notifyWindow);
 
     const T1 = 200;
