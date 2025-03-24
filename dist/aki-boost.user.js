@@ -6,10 +6,10 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.592
+// @version     1.0.601
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
-// @run-at      document-end
+// @run-at      document-start
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @grant       GM_info
@@ -24,7 +24,7 @@
   const SETTING_KEY = 'akibst_settings';
   const HIGHLIGHT_KEYWORD_HASH = 'akibst_kwd';
   const HIGHLIGHT_KEYWORD_SEP = ';;';
-  const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除
+  const NAME_KEY_PREFIX = 'akibst-partname-'; // TDDO: 削除 (旧バージョンのDB対応)
   const LINK_TITLE = `${APP_NAME} が作成したリンク`;
 
   const HASH_MENU = 'akibst_menu';
@@ -45,6 +45,8 @@
   const COLOR_LIGHT_HIGHLIGHT = '#cfc';
   const COLOR_DARK_HIGHLIGHT = '#0c0';
 
+  const SITE_URL_BASE = 'https://akizukidenshi.com';
+
   class AkiBoost {
     constructor() {
       /** @type {Database} */
@@ -63,19 +65,19 @@
 
       this.setupMenuWindow();
 
-      if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/history.aspx')) {
+      if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/customer/history.aspx`)) {
         await this.scanHistory(document);
       }
-      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/customer/historydetail.aspx')) {
+      else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/customer/historydetail.aspx`)) {
         await this.scanHistoryDetail(document);
       }
-      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/cart/cart.aspx')) {
+      else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/cart/cart.aspx`)) {
         await this.scanCart(document);
       }
-      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/g/')) {
+      else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/g/`)) {
         await this.fixItemPage(document);
       }
-      else if (window.location.href.startsWith('https://akizukidenshi.com/catalog/')) {
+      else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/`)) {
         await this.fixCatalog(document);
       }
 
@@ -134,7 +136,7 @@
       if (!this.isLoggedIn) {
         learnButton.disabled = true;
         this.menuWindow.appendChild(wrapWithParagraph(
-          '購入履歴を更新する前に <a href="https://akizukidenshi.com/catalog/customer/menu.aspx">ログイン</a> してください。'));
+          `購入履歴を更新する前に <a href="${SITE_URL_BASE}/catalog/customer/menu.aspx">ログイン</a> してください。`));
       }
 
       const cartHistoryButton = createButton('📦➜🛒 最近カートに入れた商品', '100%');
@@ -323,7 +325,7 @@
         const PAGE_STRIDE = DEBUG_MODE ? 5 : 100;
 
         status.textContent = `オーダー ID を列挙しています...`;
-        let doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
+        let doc = await this.downloadHtml(`${SITE_URL_BASE}/catalog/customer/history.aspx?ps=${PAGE_STRIDE}`);
 
         let numOrders = -1;
 
@@ -417,7 +419,7 @@
 
       windowDiv.appendChild(wrapWithParagraph(
         '「日時」はカートに入っているのを最後に確認した日時です。表示内容が古い場合は一旦\n' +
-        '<a href="https://akizukidenshi.com/catalog/cart/cart.aspx" target="_blank">カート</a>\n' +
+        `<a href="${SITE_URL_BASE}/catalog/cart/cart.aspx" target="_blank">カート</a>\n` +
         'を開いてからリロードしてみてください。'
       ));
 
@@ -498,7 +500,7 @@
           }
         }
         if (items.length > 0) {
-          const url = `https://akizukidenshi.com/catalog/quickorder/blanketorder.aspx?regist_goods=${items.join('%0D%0A')}`;
+          const url = `${SITE_URL_BASE}/catalog/quickorder/blanketorder.aspx?regist_goods=${items.join('%0D%0A')}`;
           window.open(url, '_blank');
         }
         else {
@@ -605,7 +607,7 @@
     createPartCodeLink(code) {
       const link = document.createElement('a');
       link.textContent = code;
-      link.href = `https://akizukidenshi.com/catalog/g/g${code}/`;
+      link.href = `${SITE_URL_BASE}/catalog/g/g${code}/`;
 
       const quantity = this.partQuantityInCart(code);
       if (quantity > 0) {
@@ -685,6 +687,12 @@
 
       // 購入履歴を列挙
       if (part.orderIds.length > 0) {
+        const searchLink = document.createElement('a');
+        searchLink.href = getHistorySearchUrl(part);
+        searchLink.textContent = "一覧";
+        searchLink.title = LINK_TITLE;
+        elems.push(searchLink);
+
         for (let orderId of part.orderIds) {
           if (!(orderId in this.db.orders)) continue;
           const order = this.db.orders[orderId];
@@ -702,14 +710,6 @@
       }
       else {
         elems.push(document.createTextNode('購入履歴なし'));
-      }
-
-      if (false) {
-        const link = document.createElement('a');
-        link.href = getHistorySearchUrl(part);
-        link.textContent = "購入履歴から検索";
-        link.title = LINK_TITLE;
-        elems.push(link);
       }
 
       // カートに入っている商品の情報
@@ -771,7 +771,7 @@
       const itemDls = Array.from(doc.querySelectorAll('.block-cart-i--goods'));
       for (const itemDl of itemDls) {
         const link = itemDl.querySelector('.js-enhanced-ecommerce-goods-name');
-        const name = normalizePartName(link.title);
+        const name = normalizePartName(link.textContent);
         const m = link.href.match(/\/catalog\/g\/g(\d+)\//);
         if (!m) continue;
         const code = m[1];
@@ -979,6 +979,7 @@
 
     // MARK: データベースのクリーンアップ
     async cleanupDatabase() {
+      // 記憶している通販コードと商品名を削除リストに列挙
       let unusedPartCodes = {};
       let unusedPartNames = {};
       for (const partCode in this.db.parts) {
@@ -992,6 +993,7 @@
         unusedPartNames[partName] = true;
       }
 
+      // 注文履歴に登場する通販コードと商品名を削除リストから除外
       for (let order of Object.values(this.db.orders)) {
         for (let cartItem of Object.values(order.items)) {
           if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
@@ -999,11 +1001,13 @@
         }
       }
 
+      // カート履歴に登場する通販コードと商品名を削除リストから除外
       for (let cartItem of Object.values(this.db.cart)) {
         if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
         if (cartItem.name in unusedPartNames) delete unusedPartNames[cartItem.name];
       }
 
+      // 削除リストに残った通販コードに対応する部品情報を削除
       let numDeletedCodes = 0;
       for (const partCode in unusedPartCodes) {
         if (partCode in this.db.parts) {
@@ -1013,6 +1017,7 @@
       }
       if (numDeletedCodes > 0) debugLog(`未使用の通販コードの削除: ${numDeletedCodes}個`);
 
+      // 削除リストに残った商品名を部品情報と逆引き辞書から削除
       let numDeletedNames = 0;
       for (const partName in unusedPartNames) {
         for (let part of Object.values(this.db.parts)) {
@@ -1069,19 +1074,34 @@
     constructor() {
       this.version = GM_info.script.version;
 
-      /** @type {Object.<string, string>} */
-      this.partCodeDict = {};
-
-      /** @type {Object.<string, Part>} */
+      /** 
+       * 部品情報
+       * @type {Object.<string, Part>} 
+       */
       this.parts = {};
 
-      /** @type {Object.<string, Order>} */
+      /**
+       * 注文履歴
+       * @type {Object.<string, Order>}
+       */
       this.orders = {};
 
-      /** @type {Object.<string, CartItem>} */
+      /** 
+       * カート履歴
+       * @type {Object.<string, CartItem>}
+       */
       this.cart = {};
 
-      /** @type {number} */
+      /** 
+       * 部品名の逆引き辞書
+       * @type {Object.<string, string>} 
+       */
+      this.partCodeDict = {};
+
+      /** 
+       * 注文履歴更新時の HTML ダウンロード間隔 (秒)
+       * @type {number}
+       */
       this.htmlDownloadSleepSec = 1;
     }
 
@@ -1176,8 +1196,22 @@
      * @param {string} name 
      */
     constructor(code, name) {
+      /**
+       * 通販コード
+       * @type {string}
+       */
       this.code = code;
+
+      /**
+       * 部品名の配列 (最初の要素が代表)
+       * @type {Array.<string>}
+       */
       this.names = name ? [name] : [];
+
+      /**
+       * この部品を参照している注文履歴のオーダーID
+       * @type {Array.<string>}
+       */
       this.orderIds = [];
     }
 
@@ -1232,11 +1266,41 @@
 
   // MARK: 買い物かごのアイテム
   class CartItem {
+    /**
+     * @param {string} code 通販コード
+     * @param {string} name 商品名
+     * @param {number} quantity 数量
+     * @param {number} ts タイムスタンプ
+     */
     constructor(code, name, quantity, ts = -1) {
+      /**
+       * 通販コード
+       * @type {string}
+       */
       this.code = code;
+
+      /**
+       * 商品名
+       * @type {string}
+       */
       this.name = name;
+
+      /**
+       * 数量
+       * @type {number}
+       */
       this.quantity = quantity;
+
+      /**
+       * 最後にカートに入っているのが確認された時刻
+       * @type {number}
+       */
       this.timestamp = ts;
+
+      /**
+       * カートに入っているか否か
+       * @type {boolean}
+       */
       this.isInCart = quantity > 0;
     }
 
@@ -1261,16 +1325,32 @@
      * @param {number} ts 
      */
     constructor(id, ts) {
+      /**
+       * オーダーID
+       * @type {string}
+       */
       this.id = id;
+
+      /**
+       * 注文日時
+       * @type {number}
+       */
       this.timestamp = ts;
+
+      /**
+       * 注文に含まれる商品のリスト
+       * @type {Object.<string, CartItem>}
+       */
       this.items = {};
     }
 
     /** @returns {boolean} */
     isFilled() {
       if (this.timestamp == -1) return false;
+      if (Object.keys(this.items).length == 0) return false;
       for (const code in this.items) {
         const item = this.items[code];
+        if (code.startsWith(NAME_KEY_PREFIX)) return false; // TODO: 削除 (旧バージョンのDB対応)
         if (code != item.code) return false;
         if (item.quantity <= 0) return false;
         if (!item.name) return false;
@@ -1360,7 +1440,7 @@
    * @param {string|Array|Part} kwds
    */
   function getCartUrl(kwds = null) {
-    let url = 'https://akizukidenshi.com/catalog/cart/cart.aspx';
+    let url = `${SITE_URL_BASE}/catalog/cart/cart.aspx`;
     if (!!kwds) url += '#' + encodeHeightlightKeywords(kwds);
     return url;
   }
@@ -1371,7 +1451,7 @@
    * @returns {string}
    */
   function getPartSearchUrl(name) {
-    return `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(name)}&search=search`;
+    return `${SITE_URL_BASE}/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(name)}&search=search`;
   }
 
   /**
@@ -1384,7 +1464,7 @@
       partOrName instanceof Part ?
         partOrName.getName() :
         partOrName;
-    return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B#${encodeHeightlightKeywords(partOrName)}`;
+    return `${SITE_URL_BASE}/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B#${encodeHeightlightKeywords(partOrName)}`;
   }
 
   /**
@@ -1394,7 +1474,7 @@
    * @returns {string}
    */
   function getHistoryDetailUrlFromId(orderId, kwds = null) {
-    let url = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`;
+    let url = `${SITE_URL_BASE}/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`;
     if (!!kwds) url += '#' + encodeHeightlightKeywords(kwds);
     return url;
   }
@@ -1456,7 +1536,7 @@
     }
     return false;
   }
-  
+
   /**
    * @param {HTMLElement} elm
    */
