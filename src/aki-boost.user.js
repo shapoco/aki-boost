@@ -979,6 +979,7 @@
 
     // MARK: データベースのクリーンアップ
     async cleanupDatabase() {
+      // 記憶している通販コードと商品名を削除リストに列挙
       let unusedPartCodes = {};
       let unusedPartNames = {};
       for (const partCode in this.db.parts) {
@@ -992,6 +993,7 @@
         unusedPartNames[partName] = true;
       }
 
+      // 注文履歴に登場する通販コードと商品名を削除リストから除外
       for (let order of Object.values(this.db.orders)) {
         for (let cartItem of Object.values(order.items)) {
           if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
@@ -999,11 +1001,13 @@
         }
       }
 
+      // カート履歴に登場する通販コードと商品名を削除リストから除外
       for (let cartItem of Object.values(this.db.cart)) {
         if (cartItem.code in unusedPartCodes) delete unusedPartCodes[cartItem.code];
         if (cartItem.name in unusedPartNames) delete unusedPartNames[cartItem.name];
       }
 
+      // 削除リストに残った通販コードに対応する部品情報を削除
       let numDeletedCodes = 0;
       for (const partCode in unusedPartCodes) {
         if (partCode in this.db.parts) {
@@ -1013,6 +1017,7 @@
       }
       if (numDeletedCodes > 0) debugLog(`未使用の通販コードの削除: ${numDeletedCodes}個`);
 
+      // 削除リストに残った商品名を部品情報と逆引き辞書から削除
       let numDeletedNames = 0;
       for (const partName in unusedPartNames) {
         for (let part of Object.values(this.db.parts)) {
@@ -1069,19 +1074,34 @@
     constructor() {
       this.version = GM_info.script.version;
 
-      /** @type {Object.<string, string>} */
-      this.partCodeDict = {};
-
-      /** @type {Object.<string, Part>} */
+      /** 
+       * 部品情報
+       * @type {Object.<string, Part>} 
+       */
       this.parts = {};
 
-      /** @type {Object.<string, Order>} */
+      /**
+       * 注文履歴
+       * @type {Object.<string, Order>}
+       */
       this.orders = {};
 
-      /** @type {Object.<string, CartItem>} */
+      /** 
+       * カート履歴
+       * @type {Object.<string, CartItem>}
+       */
       this.cart = {};
 
-      /** @type {number} */
+      /** 
+       * 部品名の逆引き辞書
+       * @type {Object.<string, string>} 
+       */
+      this.partCodeDict = {};
+
+      /** 
+       * 注文履歴更新時の HTML ダウンロード間隔 (秒)
+       * @type {number}
+       */
       this.htmlDownloadSleepSec = 1;
     }
 
@@ -1176,8 +1196,22 @@
      * @param {string} name 
      */
     constructor(code, name) {
+      /**
+       * 通販コード
+       * @type {string}
+       */
       this.code = code;
+
+      /**
+       * 部品名の配列 (最初の要素が代表)
+       * @type {Array.<string>}
+       */
       this.names = name ? [name] : [];
+
+      /**
+       * この部品を参照している注文履歴のオーダーID
+       * @type {Array.<string>}
+       */
       this.orderIds = [];
     }
 
@@ -1232,11 +1266,41 @@
 
   // MARK: 買い物かごのアイテム
   class CartItem {
+    /**
+     * @param {string} code 通販コード
+     * @param {string} name 商品名
+     * @param {number} quantity 数量
+     * @param {number} ts タイムスタンプ
+     */
     constructor(code, name, quantity, ts = -1) {
+      /**
+       * 通販コード
+       * @type {string}
+       */
       this.code = code;
+
+      /**
+       * 商品名
+       * @type {string}
+       */
       this.name = name;
+
+      /**
+       * 数量
+       * @type {number}
+       */
       this.quantity = quantity;
+
+      /**
+       * 最後にカートに入っているのが確認された時刻
+       * @type {number}
+       */
       this.timestamp = ts;
+
+      /**
+       * カートに入っているか否か
+       * @type {boolean}
+       */
       this.isInCart = quantity > 0;
     }
 
