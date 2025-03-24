@@ -6,10 +6,10 @@
 // @downloadURL http://localhost:51680/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.0.507
+// @version     1.0.544
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
-// @run-at      document-start
+// @run-at      document-end
 // @grant       GM.getValue
 // @grant       GM.setValue
 // @grant       GM_info
@@ -30,7 +30,7 @@
   const HASH_CART_HISTORY = 'akibst_carthistory';
 
   const QUANTITY_UNKNOWN = -1;
-  const CART_ITEM_LIFE_TIME = 7 * 86400 * 1000;
+  const CART_ITEM_LIFE_TIME = 30 * 86400 * 1000;
 
   const PARAGRAPH_MARGIN = '10px';
 
@@ -96,7 +96,7 @@
 
     // MARK: メニュー
     setupMenuWindow() {
-      this.menuOpenButton.textContent = `⚙ ${APP_NAME}`;
+      this.menuOpenButton.textContent = `${DEBUG_MODE ? '🐞' : '🔧'} ${APP_NAME}`;
       this.menuOpenButton.style.writingMode = 'vertical-rl';
       this.menuOpenButton.style.position = 'fixed';
       this.menuOpenButton.style.left = '0px';
@@ -115,6 +115,13 @@
       this.menuWindow.style.left = '40px';
       this.menuWindow.style.bottom = '100px';
 
+      if (DEBUG_MODE) {
+        const debugLabel = wrapWithParagraph('デバッグモード');
+        debugLabel.style.color = '#c00';
+        debugLabel.style.fontWeight = 'bold';
+        this.menuWindow.appendChild(debugLabel);
+      }
+
       this.menuWindow.appendChild(wrapWithParagraph(this.databaseInfoLabel));
       this.updateDatabaseInfo();
 
@@ -131,6 +138,14 @@
 
       const resetButton = createButton('📦➜🗑️ データベースをリセット', '100%');
       this.menuWindow.appendChild(wrapWithParagraph(resetButton));
+
+      this.menuWindow.appendChild(document.createElement('hr'));
+
+      const repoLink = document.createElement('a');
+      repoLink.href = GM_info.script.supportURL;
+      repoLink.textContent = 'GitHub リポジトリ';
+      repoLink.target = '_blank';
+      this.menuWindow.appendChild(wrapWithParagraph(['サポート: ', repoLink]));
 
       this.debugMenuDiv.appendChild(document.createElement('hr'));
       this.debugMenuDiv.appendChild(wrapWithParagraph('デバッグ用機能:'));
@@ -241,7 +256,7 @@
 
       const SLEEP_SEC_MIN = 0;
       const SLEEP_SEC_MAX = 10;
-      
+
       const sleepSecInput = document.createElement('input');
       sleepSecInput.type = 'number';
       sleepSecInput.min = SLEEP_SEC_MIN;
@@ -250,7 +265,7 @@
       sleepSecInput.addEventListener('change', () => {
         this.db.htmlDownloadSleepSec = sleepSecInput.value;
       });
-      
+
       const sleepSecLabel = document.createElement('label');
       sleepSecLabel.textContent = 'アクセス毎のスリープ時間: ';
       sleepSecLabel.appendChild(sleepSecInput);
@@ -352,7 +367,7 @@
             status.textContent = `購入履歴を更新しています... (${i + 1}/${orderIds.length})`;
             progressBar.value = i * 100 / orderIds.length;
 
-            const doc = await this.downloadHtml(`https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`);
+            const doc = await this.downloadHtml(getHistoryDetailUrlFromId(orderId));
             await this.scanHistoryDetail(doc);
 
             numLoaded++;
@@ -519,10 +534,10 @@
           else {
             // 通販コード不明
             const link = document.createElement('a');
-            link.textContent = '(コード不明)';
+            link.textContent = '(商品名で検索)';
             link.title = `データベースを更新してください。\n${LINK_TITLE}`;
             const keyword = partName.replace(/\s*\([^\)]+入り?\)\s*$/g, '');
-            link.href = this.getPartSearchUrl(keyword);
+            link.href = getPartSearchUrl(keyword);
             setBackgroundStyle(link, COLOR_LIGHT_HISTORY);
             itemDiv.appendChild(link);
           }
@@ -649,7 +664,7 @@
 
       if (false) {
         const link = document.createElement('a');
-        link.href = this.getHistorySearchUrl(part.name);
+        link.href = getHistorySearchUrl(part.name);
         link.textContent = "購入履歴から検索";
         link.title = LINK_TITLE;
         elems.push(link);
@@ -659,7 +674,7 @@
       const qtyInCart = this.partQuantityInCart(code);
       if (qtyInCart > 0) {
         const link = document.createElement('a');
-        link.href = this.getCartUrl(code);
+        link.href = getCartUrl(code);
         link.textContent = `カートに入っています`;
         link.style.color = COLOR_DARK_IN_CART;
         const wrap = document.createElement('span');
@@ -767,8 +782,22 @@
     createHistoryBanner(part) {
       const purchaseCount = !!part.orderIds ? part.orderIds.length : 0;
 
+      // 購入日
+      let orders = [];
+      for (let orderId of part.orderIds) {
+        if (orderId in this.db.orders) {
+          orders.push(this.db.orders[orderId]);
+        }
+      }
+      orders.sort((a, b) => b.timestamp - a.timestamp);
+
       const link = document.createElement('a');
-      link.href = this.getHistorySearchUrl(part.getName());
+      if (orders.length == 1) {
+        link.href = orders[0].getDetailUrl(part.code);
+      }
+      else {
+        link.href = getHistorySearchUrl(part.getName());
+      }
       link.style.display = 'inline-block';
       link.style.backgroundColor = COLOR_DARK_HISTORY;
       link.style.padding = '1px 5px';
@@ -778,15 +807,6 @@
       link.style.borderRadius = '4px';
       link.style.fontSize = '10px';
       link.style.color = '#fff';
-
-      // 購入日
-      let orders = [];
-      for (let orderId of part.orderIds) {
-        if (orderId in this.db.orders) {
-          orders.push(this.db.orders[orderId]);
-        }
-      }
-      orders.sort((a, b) => b.timestamp - a.timestamp);
 
       if (orders.length == 0) {
         // 購入日不明
@@ -816,7 +836,7 @@
     // MARK: カートに入っていることを示すアイコンを生成
     createCartIcon(partCode, quantity) {
       const link = document.createElement('a');
-      link.href = this.getCartUrl(partCode);
+      link.href = getCartUrl(partCode);
       link.style.display = 'inline-block';
       link.style.minWidth = '20px';
       link.style.height = '20px';
@@ -835,22 +855,6 @@
       link.textContent = quantity;
       link.title = LINK_TITLE;
       return link;
-    }
-
-    getCartUrl(partCode) {
-      let url = 'https://akizukidenshi.com/catalog/cart/cart.aspx';
-      if (partCode) url += `#:~:text=${encodeURIComponent(partCode)}`;
-      return url;
-    }
-
-    // 部品の検索用URLを生成
-    getPartSearchUrl(name) {
-      return `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(name)}&search=search`;
-    }
-
-    // 部品の検索用URLを生成
-    getHistorySearchUrl(name) {
-      return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(name)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B`;
     }
 
     /** MARK: 部品情報をIDから取得
@@ -916,21 +920,11 @@
     async loadDatabase() {
       try {
         this.db.loadFromJson(JSON.parse(await GM.getValue(SETTING_KEY)));
-        const countSpan = document.querySelector('.block-headernav--cart-count');
-        if (!countSpan || parseInt(countSpan.textContent) <= 0) {
-          // カートの商品数がゼロになっている場合は全商品をカートから外す
-          // 注文確定やセッション切れによってカートが空になった場合を想定
-          for (const item of Object.values(this.db.cart)) {
-            item.isInCart = false;
-          }
-        }
-        else {
-          // 一定以上古い商品は削除する
-          const now = new Date().getTime();
-          for (const item of Object.values(this.db.cart)) {
-            if (now - item.timestamp > CART_ITEM_LIFE_TIME) {
-              delete this.db.cart[item.code];
-            }
+        // 一定以上古い商品は削除する
+        const now = new Date().getTime();
+        for (const item of Object.values(this.db.cart)) {
+          if (now - item.timestamp > CART_ITEM_LIFE_TIME) {
+            delete this.db.cart[item.code];
           }
         }
         this.db.version = GM_info.script.version;
@@ -1010,7 +1004,7 @@
       debugLog(`部品情報: ${Object.keys(this.db.parts).length}件`);
       debugLog(`カート情報: ${Object.keys(this.db.cart).length}件`);
     }
-    
+
 
     /**
      * MARK: HTML をダウンロードしてパース
@@ -1243,6 +1237,14 @@
     }
 
     /**
+     * @param {string} kwd 
+     * @returns {string}
+     */
+    getDetailUrl(kwd = null) {
+      return getHistoryDetailUrlFromId(this.id, kwd);
+    }
+
+    /**
      * @param {string} partName 
      * @returns {string|null}
      */
@@ -1309,6 +1311,42 @@
 
       return this;
     }
+  }
+
+  function getCartUrl(kwd = null) {
+    let url = 'https://akizukidenshi.com/catalog/cart/cart.aspx';
+    if (!!kwd) url += `#:~:text=${encodeURIComponent(kwd)}`;
+    return url;
+  }
+
+  /**
+   * 部品の検索用URLを生成
+   * @param {string} name 
+   * @returns {string}
+   */
+  function getPartSearchUrl(name) {
+    return `https://akizukidenshi.com/catalog/goods/search.aspx?search=x&keyword=${encodeURIComponent(name)}&search=search`;
+  }
+
+  /**
+   * 購入履歴検索用URLを生成
+   * @param {string} partName 
+   * @returns {string}
+   */
+  function getHistorySearchUrl(partName) {
+    return `https://akizukidenshi.com/catalog/customer/history.aspx?order_id=&name=${encodeURIComponent(partName)}&year=&search=%E6%A4%9C%E7%B4%A2%E3%81%99%E3%82%8B#:~:text=${encodeURIComponent(partName)}`;
+  }
+
+  /**
+   * 購入履歴のURLを生成
+   * @param {string} orderId 
+   * @param {string} kwd 
+   * @returns {string}
+   */
+  function getHistoryDetailUrlFromId(orderId, kwd = null) {
+    let url = `https://akizukidenshi.com/catalog/customer/historydetail.aspx?order_id=${encodeURIComponent(orderId)}`;
+    if (!!kwd) url += `#:~:text=${encodeURIComponent(kwd)}`;
+    return url;
   }
 
   /**
