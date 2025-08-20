@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.2.687
+// @version     1.2.696
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -84,6 +84,9 @@
       }
       else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/g/`)) {
         await this.fixItemPage(document);
+      }
+      else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/order/order.aspx`)) {
+        await this.offerHistoryScan(document);
       }
       else if (window.location.href.startsWith(`${SITE_URL_BASE}/catalog/`)) {
         await this.fixCatalog(document);
@@ -858,6 +861,19 @@
           itemDt.appendChild(this.createCartIcon(part, quantity));
         }
       }
+    }
+
+    // MARK: 注文完了後に注文履歴学習を提案
+    async offerHistoryScan(doc) {
+      const EXPECTED_LINK_TEXT = '請求書印刷はこちら';
+
+      const div = doc.querySelector('.block-order-complete--orderid');
+      if (!div) return;
+
+      const a = Array.from(div.querySelectorAll('a')).filter(link => link.textContent == EXPECTED_LINK_TEXT);
+      if (a.length == 0) return;
+
+      notify(`「${EXPECTED_LINK_TEXT}」のクリックでこの注文の履歴を学習します。`);
     }
 
     async checkCartIsEmpty() {
