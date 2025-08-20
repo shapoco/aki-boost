@@ -1,4 +1,4 @@
-<p align="center"><img src="./image/logo.svg" width="200"></p>
+# AkiBoost
 
 ![](./image/cover.png)
 
