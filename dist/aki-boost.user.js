@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/shapoco/aki-boost/raw/refs/heads/main/dist/aki-boost.user.js
 // @match       https://akizukidenshi.com/*
 // @match       https://www.akizukidenshi.com/*
-// @version     1.1.678
+// @version     1.2.687
 // @author      Shapoco
 // @description 秋月電子の購入履歴を記憶して商品ページに購入日を表示します。
 // @run-at      document-start
@@ -217,7 +217,7 @@
           notify('JSON 形式でクリップボードにコピーしました。');
         }
         catch (ex) {
-          debugError(ex);
+          debugError(`[AkiBoost.setupMenuWindow] ${ex}`);
           notify(`クリップボードへのコピーに失敗しました。\n${ex.message}`, true);
         }
       });
@@ -238,7 +238,7 @@
           }
         }
         catch (ex) {
-          debugError(ex);
+          debugError(`[AkiBoost.setupMenuWindow] ${ex}`);
           notify(`インポートに失敗しました。\n${ex.message}`, true);
         }
       });
@@ -362,7 +362,7 @@
           }
         }
         else {
-          debugError('ページ数不明');
+          debugError(`[AkiBoost.updateHistory] ページ数不明`);
         }
 
         let orderIds = [];
@@ -424,7 +424,7 @@
       }
       catch (e) {
         const msg = `⚠️ 読み込みに失敗しました`;
-        debugError(`${msg}: ${e}`);
+        debugError(`[AkiBoost.updateHistory] ${msg}: ${e}`);
         status.textContent = msg;
       }
     }
@@ -604,6 +604,7 @@
     }
 
     /** 
+     * MARK: 購入履歴の詳細をスキャン
      * @param {Document} doc
      * @returns {Promise<boolean>} データベースが変更されたかどうか
      */
@@ -621,19 +622,30 @@
       changed |= !(orderId in this.db.orders);
       let order = this.orderById(orderId, time);
 
+      let foundPartCode = {}
+      for (let partCode in order.items) {
+        foundPartCode[partCode] = true;
+      }
+
+      if (partRows.length == 0) {
+        debugError(`[AkiBoost.scanHistoryDetail] 購入履歴の表の TR 要素が見つかりません`);
+      }
+
       for (let partRow of partRows) {
         const partCodeDiv = partRow.querySelector('.block-purchase-history-detail--goods-code');
         const partCode = partCodeDiv.textContent.trim();
         const partName = normalizePartName(partRow.querySelector('.block-purchase-history-detail--goods-name').textContent);
         const quantity = parseInt(partRow.querySelector('.block-purchase-history-detail--goods-qty').textContent.trim());
-        if (!partCode) { debugError(`通販コードが見つかりません`); continue; }
-        if (!partName) { debugError(`部品名が見つかりません`); continue; }
-        if (quantity <= 0) { debugError(`数量が見つかりません`); continue; }
+        if (!partCode) { debugError(`[AkiBoost.scanHistoryDetail] 通販コードが見つかりません`); continue; }
+        if (!partName) { debugError(`[AkiBoost.scanHistoryDetail] 部品名が見つかりません`); continue; }
+        if (quantity <= 0) { debugError(`[AkiBoost.scanHistoryDetail] 数量が見つかりません`); continue; }
 
         // データベース更新
         let part = this.partByCode(partCode, partName);
         changed |= part.linkToOrder(orderId);
         changed |= order.linkToPart(partCode, partName, quantity);
+
+        delete foundPartCode[partCode];
 
         // ID にリンクを張る
         partCodeDiv.innerHTML = '';
@@ -644,6 +656,17 @@
           highlightElement(partRow);
           if (!highlightedElement) highlightedElement = partRow;
         }
+      }
+
+      if (Object.keys(foundPartCode).length != 0) {
+        var msg = "次の商品は通販コードが変わった可能性があります。\n";
+        for (let partCode in foundPartCode) {
+          const part = order.items[partCode];
+          msg += `- [${part.code}] ${part.name}\n`;
+          delete order.items[partCode];
+          changed = true;
+        }
+        notify(msg);
       }
 
       //await focusHighlightedElement(highlightedElement);
@@ -727,7 +750,7 @@
 
       const h1 = doc.querySelector('.block-goods-name--text');
       if (!h1) {
-        debugError(`部品名が見つかりません`);
+        debugError(`[AkiBoost.fixItemPage] 部品名が見つかりません`);
         return;
       }
 
@@ -1114,7 +1137,7 @@
         await GM.setValue(SETTING_KEY, JSON.stringify(this.db));
       }
       catch (e) {
-        debugError(`データベースの保存に失敗しました: ${e}`);
+        debugError(`[AkiBoost.saveDatabase] データベースの保存に失敗しました: ${e}`);
       }
     }
 
@@ -1216,7 +1239,7 @@
           // 部品情報
           for (let code in json.parts) {
             if (isBadKey(code)) {
-              debugError(`[DB] 不正な通販コードを削除しました`);
+              debugError(`[Database.loadFromJson] 不正な通販コードを削除しました`);
               continue;
             }
 
@@ -1906,12 +1929,24 @@
    * @param {boolean} error 
    */
   function notify(msg, error = false) {
+    const NOTIFY_CLASS_NAME = 'akibst-notify-window';
+
     debugLog(`通知: [${error ? 'エラー' : '情報'}]: ${msg}`);
 
+    // 既に通知が表示されている場合は一番上に重ねる
+    const existingWindows = Array.from(document.querySelectorAll(`.${NOTIFY_CLASS_NAME}`));
+    let nextBottom = 20;
+    for (const win of existingWindows) {
+      const rect = win.getBoundingClientRect();
+      const bottom = win.computedStyleMap().get('bottom').value;
+      nextBottom = Math.max(nextBottom, bottom + rect.height + 20);
+    }
+
     const notifyWindow = document.createElement('div');
+    notifyWindow.classList.add(NOTIFY_CLASS_NAME);
     notifyWindow.style.position = 'fixed';
     notifyWindow.style.zIndex = '10000';
-    notifyWindow.style.bottom = '20px';
+    notifyWindow.style.bottom = `${nextBottom}px`;
     notifyWindow.style.left = '20px';
     notifyWindow.style.opacity = '0';
     notifyWindow.style.backgroundColor = '#fff';
